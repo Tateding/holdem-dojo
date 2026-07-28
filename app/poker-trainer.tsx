@@ -10,12 +10,14 @@ type ActionKind = "fold" | "check" | "call" | "raise";
 type Difficulty = "guide" | "standard" | "advanced";
 type MatchMode = "cash" | "tournament";
 type RebuyMode = "auto" | "manual" | "off";
+type TableSize = "headsUp" | "sixMax";
 
 type TableSettings = {
   difficulty: Difficulty;
   mode: MatchMode;
   stackBB: 50 | 100 | 200;
   rebuy: RebuyMode;
+  tableSize: TableSize;
 };
 
 type Tendencies = {
@@ -23,6 +25,32 @@ type Tendencies = {
   folds: number;
   calls: number;
   raises: number;
+};
+
+type SixSeat = {
+  id: string;
+  name: string;
+  position: string;
+  stack: number;
+  active: boolean;
+  action: string;
+  hole: Card[];
+};
+
+type SixScenario = {
+  handNo: number;
+  street: Street;
+  board: Card[];
+  hero: Card[];
+  heroPosition: string;
+  seats: SixSeat[];
+  pot: number;
+  toCall: number;
+  deck: Card[];
+  resolved: boolean;
+  outcome: string;
+  feedback: string;
+  reveal: boolean;
 };
 
 type Game = {
@@ -63,6 +91,7 @@ const defaultSettings: TableSettings = {
   mode: "cash",
   stackBB: 100,
   rebuy: "auto",
+  tableSize: "headsUp",
 };
 const rankText: Record<number, string> = {
   14: "A", 13: "K", 12: "Q", 11: "J", 10: "10", 9: "9", 8: "8",
@@ -183,6 +212,178 @@ function estimateEquity(hole: Card[], board: Card[], samples = 240) {
     points += cmp > 0 ? 1 : cmp === 0 ? 0.5 : 0;
   }
   return points / samples;
+}
+
+function estimateMultiwayEquity(hole: Card[], board: Card[], opponents: number, samples = 300) {
+  const used = new Set([...hole, ...board].map((c) => `${c.rank}${c.suit}`));
+  const pool: Card[] = [];
+  (["♠", "♥", "♦", "♣"] as Suit[]).forEach((suit) => {
+    for (let rank = 2; rank <= 14; rank += 1) {
+      if (!used.has(`${rank}${suit}`)) pool.push({ rank, suit });
+    }
+  });
+  let points = 0;
+  for (let n = 0; n < samples; n += 1) {
+    const copy = [...pool];
+    const needed = opponents * 2 + (5 - board.length);
+    for (let i = 0; i < needed; i += 1) {
+      const j = i + Math.floor(Math.random() * (copy.length - i));
+      [copy[i], copy[j]] = [copy[j], copy[i]];
+    }
+    const runout = [...board, ...copy.slice(opponents * 2, needed)];
+    const heroEval = evaluate([...hole, ...runout]);
+    let tied = 1;
+    let beaten = false;
+    for (let i = 0; i < opponents; i += 1) {
+      const opponentEval = evaluate([...copy.slice(i * 2, i * 2 + 2), ...runout]);
+      const cmp = compareScore(heroEval.score, opponentEval.score);
+      if (cmp < 0) {
+        beaten = true;
+        break;
+      }
+      if (cmp === 0) tied += 1;
+    }
+    if (!beaten) points += 1 / tied;
+  }
+  return points / samples;
+}
+
+function createSixScenario(previous?: SixScenario, settings: TableSettings = defaultSettings): SixScenario {
+  const deck = shuffledDeck();
+  const hero = deck.splice(0, 2);
+  const names = ["岩石", "观察者", "进攻手", "稳健派", "变速手"];
+  const allPositions = ["UTG", "HJ", "CO", "BTN", "SB", "BB"];
+  const heroPosition = allPositions[Math.floor(Math.random() * allPositions.length)];
+  const botPositions = allPositions.filter((position) => position !== heroPosition);
+  const streetRoll = Math.random();
+  const street: Street = streetRoll < 0.28 ? "preflop" : streetRoll < 0.64 ? "flop" : streetRoll < 0.84 ? "turn" : "river";
+  const boardTarget = street === "preflop" ? 0 : street === "flop" ? 3 : street === "turn" ? 4 : 5;
+  const botHoles = names.map(() => deck.splice(0, 2));
+  const board: Card[] = [];
+  if (boardTarget >= 3) {
+    deck.shift();
+    board.push(...deck.splice(0, 3));
+  }
+  if (boardTarget >= 4) {
+    deck.shift();
+    board.push(deck.shift()!);
+  }
+  if (boardTarget >= 5) {
+    deck.shift();
+    board.push(deck.shift()!);
+  }
+  const maxActive = settings.difficulty === "guide" ? 2 : settings.difficulty === "standard" ? 4 : 5;
+  const activeCount = 1 + Math.floor(Math.random() * maxActive);
+  const activeIndexes = [...Array(5).keys()].sort(() => Math.random() - 0.5).slice(0, activeCount);
+  const facingBet = Math.random() < (settings.difficulty === "guide" ? 0.58 : settings.difficulty === "standard" ? 0.72 : 0.84);
+  const sizingSteps = settings.difficulty === "guide" ? 2 : settings.difficulty === "standard" ? 5 : 8;
+  const baseBet = street === "preflop" ? 20 + Math.floor(Math.random() * sizingSteps) * 10 : 25 + Math.floor(Math.random() * sizingSteps) * 10;
+  const toCall = facingBet ? baseBet : 0;
+  const starting = settings.stackBB * BB;
+  const seats: SixSeat[] = names.map((name, index) => {
+    const active = activeIndexes.includes(index);
+    const action = !active ? "弃牌" : facingBet && index === activeIndexes[0] ? `下注 ${baseBet}` : facingBet ? "跟注" : "过牌";
+    return {
+      id: `bot-${index}`,
+      name,
+      position: botPositions[index],
+      stack: starting - (active ? Math.max(10, baseBet) : 0),
+      active,
+      action,
+      hole: botHoles[index],
+    };
+  });
+  return {
+    handNo: (previous?.handNo ?? 0) + 1,
+    street,
+    board,
+    hero,
+    heroPosition,
+    seats,
+    pot: 15 + activeCount * Math.max(10, baseBet),
+    toCall,
+    deck,
+    resolved: false,
+    outcome: "",
+    feedback: "",
+    reveal: false,
+  };
+}
+
+function sixRecommendation(scenario: SixScenario, equity: number) {
+  const odds = scenario.toCall > 0 ? scenario.toCall / (scenario.pot + scenario.toCall) : 0;
+  if (scenario.toCall === 0) {
+    if (equity > 0.58) return { key: "raise", label: "下注", reason: "你的多人胜率仍然领先，可以让较弱的牌付费。" };
+    return { key: "check", label: "过牌", reason: "多人底池中需要更强的牌，免费继续通常更稳妥。" };
+  }
+  if (equity + 0.03 < odds) return { key: "fold", label: "弃牌", reason: `跟注至少需要约 ${Math.round(odds * 100)}% 胜率，目前估算不足。` };
+  if (equity > 0.64) return { key: "raise", label: "加注", reason: "即使面对多名对手，你仍有明显胜率优势。" };
+  return { key: "call", label: "跟注", reason: `估算胜率高于约 ${Math.round(odds * 100)}% 的跟注门槛。` };
+}
+
+function resolveSixScenario(
+  scenario: SixScenario,
+  action: "fold" | "call" | "check" | "raise",
+  equity: number,
+  difficulty: Difficulty,
+) {
+  const rec = sixRecommendation(scenario, equity);
+  if (action === "fold") {
+    return {
+      ...scenario,
+      resolved: true,
+      outcome: `你在 ${scenario.heroPosition} 位置弃牌，保留剩余筹码`,
+      feedback: rec.key === "fold" ? `思路成立：${rec.reason}` : `这次偏保守。教练更倾向${rec.label}：${rec.reason}`,
+    };
+  }
+  let contenders = scenario.seats.filter((seat) => seat.active);
+  let updatedSeats = scenario.seats;
+  let extra = scenario.toCall;
+  if (action === "raise") {
+    const raiseExtra = Math.max(20, Math.round(scenario.pot * 0.65 / 5) * 5);
+    extra += raiseExtra;
+    const foldChance = difficulty === "guide" ? 0.46 : difficulty === "standard" ? 0.34 : 0.27;
+    let continuing = contenders.filter(() => Math.random() > foldChance);
+    if (continuing.length === 0) continuing = [contenders[Math.floor(Math.random() * contenders.length)]];
+    const ids = new Set(continuing.map((seat) => seat.id));
+    updatedSeats = scenario.seats.map((seat) => seat.active && !ids.has(seat.id) ? { ...seat, active: false, action: "面对加注弃牌" } : seat);
+    contenders = continuing;
+  }
+  const deck = [...scenario.deck];
+  const board = [...scenario.board];
+  while (board.length < 5) {
+    deck.shift();
+    board.push(...deck.splice(0, board.length === 0 ? 3 : 1));
+  }
+  const heroEval = evaluate([...scenario.hero, ...board]);
+  let bestSeat: SixSeat | null = null;
+  let heroBest = true;
+  let tie = false;
+  contenders.forEach((seat) => {
+    const opponentEval = evaluate([...seat.hole, ...board]);
+    const cmp = compareScore(heroEval.score, opponentEval.score);
+    if (cmp < 0) {
+      heroBest = false;
+      if (!bestSeat || compareScore(opponentEval.score, evaluate([...bestSeat.hole, ...board]).score) > 0) bestSeat = seat;
+    } else if (cmp === 0) tie = true;
+  });
+  const finalPot = scenario.pot + extra + (action === "raise" ? contenders.length * Math.max(20, extra - scenario.toCall) : 0);
+  const outcome = heroBest
+    ? tie ? `你用${heroEval.name}与对手平分约 ${finalPot} 的底池` : `你用${heroEval.name}赢下约 ${finalPot} 的多人底池`
+    : `${bestSeat?.name ?? "对手"}在摊牌时获胜；你的牌型是${heroEval.name}`;
+  const normalized = action === "check" ? "check" : action;
+  return {
+    ...scenario,
+    board,
+    seats: updatedSeats,
+    deck,
+    resolved: true,
+    reveal: true,
+    outcome,
+    feedback: normalized === rec.key || (rec.key === "call" && action === "raise")
+      ? `思路成立：${rec.reason}`
+      : `复盘：教练更倾向${rec.label}。${rec.reason}`,
+  };
 }
 
 function blindsForHand(settings: TableSettings, handNo: number) {
@@ -599,10 +800,11 @@ function SimulationSetup({
   onStart: (settings: TableSettings) => void;
 }) {
   const [draft, setDraft] = useState(initial);
+  const multiplayer = draft.tableSize === "sixMax";
   const difficultyInfo = {
-    guide: { title: "陪练", tag: "第一次上桌", tone: "最容易", points: ["约 90 次胜率模拟", "不主动诈唬", "只有很强时才加注", "下注尺度固定、容易看懂"] },
-    standard: { title: "标准", tag: "理解基本规则后", tone: "接近普通玩家", points: ["约 220 次胜率模拟", "约 8% 随机诈唬", "会根据底池赔率弃牌", "会进行价值下注和加注"] },
-    advanced: { title: "进阶", tag: "练习真实博弈", tone: "最难", points: ["约 520 次胜率模拟", "下注尺度会混合变化", "记录你的弃牌与加注倾向", "你越常弃牌，它越常诈唬"] },
+    guide: { title: "陪练", tag: "第一次上桌", tone: "最容易", points: multiplayer ? ["约 160 次多人胜率模拟", "只安排较清晰的对手行动", "复盘解释更直接", "默认打开教练提示"] : ["约 90 次胜率模拟", "不主动诈唬", "只有很强时才加注", "下注尺度固定、容易看懂"] },
+    standard: { title: "标准", tag: "理解基本规则后", tone: "接近普通玩家", points: multiplayer ? ["约 380 次多人胜率模拟", "会出现多人跟注与加注", "加注后部分对手会弃牌", "位置变化更频繁"] : ["约 220 次胜率模拟", "约 8% 随机诈唬", "会根据底池赔率弃牌", "会进行价值下注和加注"] },
+    advanced: { title: "进阶", tag: "练习真实博弈", tone: "最难", points: multiplayer ? ["约 760 次多人胜率模拟", "更复杂的多人存活组合", "面对加注的对手更顽强", "默认关闭教练提示"] : ["约 520 次胜率模拟", "下注尺度会混合变化", "记录你的弃牌与加注倾向", "你越常弃牌，它越常诈唬"] },
   };
 
   function patch(next: Partial<TableSettings>) {
@@ -615,12 +817,29 @@ function SimulationSetup({
         <p className="eyebrow">TABLE SIMULATOR / 牌局仿真</p>
         <h1>先定规则，<br /><em>再坐上牌桌。</em></h1>
         <p>这里设置的是实际牌局规则，不只是外观。AI 行为、盲注速度、筹码深度和输光后的处理都会跟着改变。</p>
-        <div className="simulation-badge"><span></span><b>单挑仿真</b><small>你 vs 1 位 AI · 无真钱</small></div>
+        <div className="simulation-badge"><span></span><b>{draft.tableSize === "headsUp" ? "单挑仿真" : "六人决策桌"}</b><small>{draft.tableSize === "headsUp" ? "你 vs 1 位 AI" : "你 + 5 位 AI"} · 无真钱</small></div>
       </div>
 
       <div className="setup-form">
         <section className="setup-section">
-          <div className="setup-title"><b>01</b><div><span>先选 AI</span><h2>难度档次</h2></div></div>
+          <div className="setup-title"><b>01</b><div><span>这次坐几个人</span><h2>选择牌桌模块</h2></div></div>
+          <div className="table-size-grid">
+            <button className={draft.tableSize === "headsUp" ? "selected" : ""} onClick={() => patch({ tableSize: "headsUp" })}>
+              <div className="seat-dots two"><i></i><i></i></div>
+              <span>HEADS-UP</span><strong>单挑完整牌局</strong>
+              <p>你对一名 AI，连续保留筹码，适合学习下注流程和长期对抗。</p>
+            </button>
+            <button className={draft.tableSize === "sixMax" ? "selected" : ""} onClick={() => patch({ tableSize: "sixMax" })}>
+              <div className="seat-dots six"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+              <span>6-MAX</span><strong>六人桌决策训练</strong>
+              <p>五名 AI 同桌，位置与前序行动每题变化，重点练习多人底池判断。</p>
+            </button>
+          </div>
+          {draft.tableSize === "sixMax" && <p className="module-note">六人模块采用“随机决策点 → 你的选择 → 自动跑到摊牌”的训练方式，每题重置有效筹码，暂不模拟多路边池。</p>}
+        </section>
+
+        <section className="setup-section">
+          <div className="setup-title"><b>02</b><div><span>再选 AI</span><h2>难度档次</h2></div></div>
           <div className="difficulty-grid">
             {(Object.keys(difficultyInfo) as Difficulty[]).map((key) => {
               const info = difficultyInfo[key];
@@ -635,8 +854,9 @@ function SimulationSetup({
           </div>
         </section>
 
+        {draft.tableSize === "headsUp" && (
         <section className="setup-section">
-          <div className="setup-title"><b>02</b><div><span>牌局怎么结束</span><h2>现金桌还是锦标赛</h2></div></div>
+          <div className="setup-title"><b>03</b><div><span>牌局怎么结束</span><h2>现金桌还是锦标赛</h2></div></div>
           <div className="mode-grid">
             <button className={draft.mode === "cash" ? "selected" : ""} onClick={() => patch({ mode: "cash", rebuy: draft.rebuy === "off" ? "off" : "auto" })}>
               <span>CASH / 普通筹码桌</span><strong>随时打，盲注固定</strong>
@@ -648,10 +868,11 @@ function SimulationSetup({
             </button>
           </div>
         </section>
+        )}
 
-        <section className="setup-section setup-pair">
+        <section className={`setup-section setup-pair ${draft.tableSize === "sixMax" ? "single" : ""}`}>
           <div>
-            <div className="setup-title"><b>03</b><div><span>能承受多少波动</span><h2>起始筹码</h2></div></div>
+            <div className="setup-title"><b>04</b><div><span>能承受多少波动</span><h2>起始筹码</h2></div></div>
             <div className="segmented">
               {([50, 100, 200] as const).map((value) => (
                 <button key={value} className={draft.stackBB === value ? "selected" : ""} onClick={() => patch({ stackBB: value })}>
@@ -661,8 +882,8 @@ function SimulationSetup({
             </div>
             <p className="setup-help">BB 是“大盲”的缩写。100 BB 表示起始筹码等于 100 个大盲，最适合学习。</p>
           </div>
-          <div>
-            <div className="setup-title"><b>04</b><div><span>输光之后怎么办</span><h2>再入规则</h2></div></div>
+          {draft.tableSize === "headsUp" && <div>
+            <div className="setup-title"><b>05</b><div><span>输光之后怎么办</span><h2>再入规则</h2></div></div>
             <div className="rebuy-options">
               {draft.mode === "cash" && (
                 <button className={draft.rebuy === "auto" ? "selected" : ""} onClick={() => patch({ rebuy: "auto" })}>
@@ -676,19 +897,21 @@ function SimulationSetup({
                 <strong>禁止再入</strong><span>输光即结束整场</span>
               </button>
             </div>
-          </div>
+          </div>}
         </section>
 
         <section className="setup-summary">
           <div>
             <span>你的仿真牌局</span>
             <strong>
-              {difficultyInfo[draft.difficulty].title} AI · {draft.mode === "cash" ? "普通筹码桌" : "锦标赛"} · {draft.stackBB} BB
+              {draft.tableSize === "headsUp"
+                ? `单挑 · ${difficultyInfo[draft.difficulty].title} AI · ${draft.mode === "cash" ? "普通筹码桌" : "锦标赛"} · ${draft.stackBB} BB`
+                : `六人桌 · ${difficultyInfo[draft.difficulty].title} AI · ${draft.stackBB} BB 情景训练`}
             </strong>
             <p>
-              {draft.mode === "cash" ? "固定盲注 5/10" : "每 5 手盲注升级"}
-              {" · "}
-              {draft.rebuy === "auto" ? "自动补满" : draft.rebuy === "manual" ? "允许手动再入" : "输光结束"}
+              {draft.tableSize === "headsUp"
+                ? `${draft.mode === "cash" ? "固定盲注 5/10" : "每 5 手盲注升级"} · ${draft.rebuy === "auto" ? "自动补满" : draft.rebuy === "manual" ? "允许手动再入" : "输光结束"}`
+                : "随机位置与前序行动 · 每题自动跑到摊牌 · 可完全关闭教练"}
             </p>
           </div>
           <button className="launch-table" onClick={() => onStart(draft)}>开始这场牌局 →</button>
@@ -698,10 +921,157 @@ function SimulationSetup({
   );
 }
 
+function SixMaxTrainer({
+  settings,
+  coachOpen,
+  onCoachOpen,
+  onSetup,
+}: {
+  settings: TableSettings;
+  coachOpen: boolean;
+  onCoachOpen: (open: boolean) => void;
+  onSetup: () => void;
+}) {
+  const [scenario, setScenario] = useState<SixScenario | null>(null);
+
+  useEffect(() => {
+    setScenario(createSixScenario(undefined, settings));
+  }, [settings]);
+
+  const activeOpponents = scenario?.seats.filter((seat) => seat.active).length ?? 1;
+  const samples = settings.difficulty === "guide" ? 160 : settings.difficulty === "standard" ? 380 : 760;
+  const equity = useMemo(
+    () => scenario ? estimateMultiwayEquity(scenario.hero, scenario.board, activeOpponents, samples) : 0,
+    [scenario?.hero, scenario?.board, activeOpponents, samples],
+  );
+  const advice = scenario ? sixRecommendation(scenario, equity) : null;
+  const potOdds = scenario?.toCall ? scenario.toCall / (scenario.pot + scenario.toCall) : 0;
+
+  if (!scenario) return <main className="loading">正在安排六人座位…</main>;
+
+  function act(action: "fold" | "call" | "check" | "raise") {
+    setScenario((current) => current ? resolveSixScenario(current, action, equity, settings.difficulty) : current);
+  }
+
+  function nextScenario() {
+    setScenario((current) => createSixScenario(current ?? undefined, settings));
+  }
+
+  return (
+    <>
+      <section className="six-hero" id="top">
+        <div>
+          <p className="eyebrow">6-MAX DECISION LAB / 六人桌</p>
+          <h1>先看前面发生了什么，<em>再看自己的牌。</em></h1>
+        </div>
+        <div className="six-mode-note">
+          <span>情景仿真</span>
+          <p>每题抽取一个真实六人桌决策点。你选择后，系统自动发完剩余公共牌并摊牌。</p>
+          <button onClick={onSetup}>更改桌型或难度</button>
+        </div>
+      </section>
+
+      <section className={`six-workspace ${coachOpen ? "" : "coach-closed"}`}>
+        <div className="six-main">
+          <div className="six-meta">
+            <span>第 {scenario.handNo} 题</span>
+            <strong>{streetName[scenario.street]}</strong>
+            <span>你在 {scenario.heroPosition} · {activeOpponents} 名对手仍在牌局</span>
+          </div>
+          <div className="six-table">
+            {scenario.seats.map((seat, index) => (
+              <div className={`six-seat six-seat-${index} ${seat.active ? "active" : "folded"}`} key={seat.id}>
+                <div className="six-avatar">{seat.name.slice(0, 1)}</div>
+                <div><strong>{seat.name}</strong><span>{seat.position} · {seat.stack}</span><em>{seat.action}</em></div>
+                <div className="mini-hole">
+                  {seat.active ? (
+                    <>
+                      <CardView card={seat.hole[0]} hidden={!scenario.reveal} small />
+                      <CardView card={seat.hole[1]} hidden={!scenario.reveal} small />
+                    </>
+                  ) : <b>已弃牌</b>}
+                </div>
+              </div>
+            ))}
+
+            <div className="six-pot"><span>底池</span><strong>{scenario.pot}</strong></div>
+            <div className="six-board">
+              {[0, 1, 2, 3, 4].map((index) => scenario.board[index]
+                ? <CardView key={`${scenario.board[index].rank}${scenario.board[index].suit}`} card={scenario.board[index]} />
+                : <div className="card-slot" key={index}>{index < 3 ? "F" : index === 3 ? "T" : "R"}</div>)}
+            </div>
+            <div className="six-hero-seat">
+              <div className="hero-position"><b>{scenario.heroPosition}</b><span>你的位置</span></div>
+              <div className="six-hero-cards"><CardView card={scenario.hero[0]} /><CardView card={scenario.hero[1]} /></div>
+              <div><strong>你</strong><span>{settings.stackBB * BB} 筹码</span></div>
+            </div>
+          </div>
+
+          <div className="six-action-panel">
+            {scenario.resolved ? (
+              <div className="six-result">
+                <div><span>本题结果</span><strong>{scenario.outcome}</strong></div>
+                <button className="primary-action" onClick={nextScenario}>下一道六人题 →</button>
+              </div>
+            ) : (
+              <>
+                <div className="turn-prompt">
+                  <div><span>轮到你了</span><strong>{scenario.toCall ? `继续需要补 ${scenario.toCall}` : "目前没人要求你补筹码"}</strong></div>
+                  <small>先观察每个座位下方的前序行动</small>
+                </div>
+                <div className="action-buttons six-actions">
+                  {scenario.toCall > 0 && <button className="fold" onClick={() => act("fold")}>弃牌</button>}
+                  <button onClick={() => act(scenario.toCall ? "call" : "check")}>{scenario.toCall ? `跟注 ${scenario.toCall}` : "过牌"}</button>
+                  <button className="raise" onClick={() => act("raise")}>{scenario.toCall ? "加注 2/3 池" : "下注 2/3 池"}</button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+
+        {coachOpen ? (
+          <aside className="coach six-coach">
+            <div className="coach-head">
+              <div><p className="eyebrow">MULTIWAY COACH</p><h2>多人教练</h2></div>
+              <button className="coach-close" onClick={() => onCoachOpen(false)} aria-label="关闭教练提示">×</button>
+            </div>
+            <div className="independent-tip"><b>想独立思考？</b><p>关闭后整个提示栏会消失，不再显示胜率和建议。</p></div>
+            <div className="metrics">
+              <Metric label="多人估算胜率" value={`${Math.round(equity * 100)}%`} muted={`面对 ${activeOpponents} 人`} />
+              <Metric label="继续的门槛" value={scenario.toCall ? `${Math.round(potOdds * 100)}%` : "不用付"} muted="底池赔率" />
+              <Metric label="你的位置" value={scenario.heroPosition} muted="六人桌位置" />
+            </div>
+            <div className="advice">
+              <span>当前建议</span>
+              <strong>{advice?.label}</strong>
+              <p>{advice?.reason}</p>
+            </div>
+            <div className="coach-note">
+              <span>{scenario.resolved ? "行动复盘" : "多人桌提醒"}</span>
+              <p>{scenario.resolved ? scenario.feedback : "对手越多，任何一手随机牌击中公共牌的机会越大，所以多人底池通常需要更强的牌才能继续。"}</p>
+            </div>
+            <details open>
+              <summary>位置的简单含义</summary>
+              <dl className="position-list">
+                <div><dt>UTG / HJ</dt><dd>较早行动，要更谨慎。</dd></div>
+                <div><dt>CO / BTN</dt><dd>较晚行动，信息更多。</dd></div>
+                <div><dt>SB / BB</dt><dd>已经放入盲注，翻牌后通常先行动。</dd></div>
+              </dl>
+            </details>
+          </aside>
+        ) : (
+          <button className="coach-reopen" onClick={() => onCoachOpen(true)}><span>?</span>打开教练提示</button>
+        )}
+      </section>
+    </>
+  );
+}
+
 export default function PokerTrainer() {
   const [game, setGame] = useState<Game | null>(null);
-  const [tab, setTab] = useState<"table" | "learn" | "setup">("learn");
+  const [tab, setTab] = useState<"table" | "six" | "learn" | "setup">("learn");
   const [showHints, setShowHints] = useState(true);
+  const [coachOpen, setCoachOpen] = useState(true);
   const [stats, setStats] = useState({ hands: 0, good: 0 });
   const [settings, setSettings] = useState<TableSettings>(defaultSettings);
   const [tendencies, setTendencies] = useState<Tendencies>({ decisions: 0, folds: 0, calls: 0, raises: 0 });
@@ -800,7 +1170,8 @@ export default function PokerTrainer() {
     setTendencies({ decisions: 0, folds: 0, calls: 0, raises: 0 });
     setGame(startHand(undefined, nextSettings));
     setShowHints(nextSettings.difficulty !== "advanced");
-    setTab("table");
+    setCoachOpen(nextSettings.difficulty !== "advanced");
+    setTab(nextSettings.tableSize === "sixMax" ? "six" : "table");
   }
 
   function rebuy() {
@@ -841,6 +1212,16 @@ export default function PokerTrainer() {
           <button className={tab === "learn" ? "active" : ""} onClick={() => setTab("learn")}>从零开始</button>
           <button className={tab === "setup" ? "active" : ""} onClick={() => setTab("setup")}>仿真设置</button>
           <button className={tab === "table" ? "active" : ""} onClick={() => setTab("table")}>牌桌练习</button>
+          <button
+            className={tab === "six" ? "active" : ""}
+            onClick={() => {
+              const next = { ...settings, tableSize: "sixMax" as TableSize };
+              setSettings(next);
+              setTab("six");
+            }}
+          >
+            六人桌
+          </button>
         </nav>
         <div className="header-note"><span></span>纯单机 · 无真钱</div>
       </header>
@@ -855,7 +1236,7 @@ export default function PokerTrainer() {
             <p>看不懂术语也没关系。轮到你时只看三件事：手里的牌、继续要付多少、教练建议什么。</p>
           </section>
 
-          <section className="workspace">
+          <section className={`workspace ${coachOpen ? "" : "coach-closed"}`}>
             <div className="table-column">
               <div className="table-meta">
                 <span>{game.settings.mode === "cash" ? "普通筹码桌" : `锦标赛 Lv.${tournamentLevel}`} · {difficultyLabel}</span>
@@ -941,10 +1322,14 @@ export default function PokerTrainer() {
               </div>
             </div>
 
+            {coachOpen ? (
             <aside className="coach">
               <div className="coach-head">
                 <div><p className="eyebrow">LIVE COACH</p><h2>决策教练</h2></div>
-                <label className="switch"><input type="checkbox" checked={showHints} onChange={(e) => setShowHints(e.target.checked)} /><span></span>提示</label>
+                <div className="coach-controls">
+                  <label className="switch"><input type="checkbox" checked={showHints} onChange={(e) => setShowHints(e.target.checked)} /><span></span>提示</label>
+                  <button className="coach-close" onClick={() => setCoachOpen(false)} aria-label="关闭教练提示">×</button>
+                </div>
               </div>
               <div className={`ai-profile ${game.settings.difficulty}`}>
                 <div><span>当前对手</span><strong>{difficultyLabel}</strong></div>
@@ -994,6 +1379,9 @@ export default function PokerTrainer() {
                 <small>记录只保存在这台设备</small>
               </div>
             </aside>
+            ) : (
+              <button className="coach-reopen" onClick={() => setCoachOpen(true)}><span>?</span>打开教练提示</button>
+            )}
           </section>
 
           <section className="principles">
@@ -1007,6 +1395,13 @@ export default function PokerTrainer() {
             </div>
           </section>
         </>
+      ) : tab === "six" ? (
+        <SixMaxTrainer
+          settings={settings}
+          coachOpen={coachOpen}
+          onCoachOpen={setCoachOpen}
+          onSetup={() => setTab("setup")}
+        />
       ) : tab === "setup" ? (
         <SimulationSetup initial={settings} onStart={startSimulation} />
       ) : (

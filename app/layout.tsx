@@ -9,7 +9,7 @@ export async function generateMetadata(): Promise<Metadata> {
   const image = `${protocol}://${host}/og.png`;
   return {
     title: "德州研习室｜从零开始学德州扑克",
-    description: "连扑克牌都不认识也能学：零基础课程、三档 AI、现金桌与锦标赛仿真，不涉及真钱。",
+    description: "连扑克牌都不认识也能学：零基础课程、三档 AI、单挑与六人桌训练、现金桌与锦标赛仿真，不涉及真钱。",
     icons: { icon: "/favicon.svg" },
     openGraph: {
       title: "德州研习室",
