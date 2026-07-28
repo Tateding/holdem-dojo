@@ -115,11 +115,11 @@ const rankText: Record<number, string> = {
   7: "7", 6: "6", 5: "5", 4: "4", 3: "3", 2: "2",
 };
 const streetName: Record<Street, string> = {
-  preflop: "翻牌前",
-  flop: "翻牌",
-  turn: "转牌",
-  river: "河牌",
-  complete: "本手结束",
+  preflop: "Pre-flop",
+  flop: "Flop",
+  turn: "Turn",
+  river: "River",
+  complete: "Hand complete",
 };
 
 function shuffledDeck() {
@@ -165,35 +165,35 @@ function evaluateFive(cards: Card[]): Eval {
       break;
     }
   }
-  if (flush && straightHigh) return { score: [8, straightHigh], name: "同花顺" };
-  if (groups[0][1] === 4) return { score: [7, groups[0][0], groups[1][0]], name: "四条" };
+  if (flush && straightHigh) return { score: [8, straightHigh], name: "Straight flush" };
+  if (groups[0][1] === 4) return { score: [7, groups[0][0], groups[1][0]], name: "Four of a kind" };
   if (groups[0][1] === 3 && groups[1]?.[1] === 2) {
-    return { score: [6, groups[0][0], groups[1][0]], name: "葫芦" };
+    return { score: [6, groups[0][0], groups[1][0]], name: "Full house" };
   }
-  if (flush) return { score: [5, ...ranks], name: "同花" };
-  if (straightHigh) return { score: [4, straightHigh], name: "顺子" };
+  if (flush) return { score: [5, ...ranks], name: "Flush" };
+  if (straightHigh) return { score: [4, straightHigh], name: "Straight" };
   if (groups[0][1] === 3) {
     return {
       score: [3, groups[0][0], ...groups.slice(1).map(([r]) => r).sort((a, b) => b - a)],
-      name: "三条",
+      name: "Three of a kind",
     };
   }
   if (groups[0][1] === 2 && groups[1]?.[1] === 2) {
     const pairs = [groups[0][0], groups[1][0]].sort((a, b) => b - a);
     const kicker = groups.find(([r, c]) => c === 1 && !pairs.includes(r))?.[0] ?? 0;
-    return { score: [2, ...pairs, kicker], name: "两对" };
+    return { score: [2, ...pairs, kicker], name: "Two pair" };
   }
   if (groups[0][1] === 2) {
     return {
       score: [1, groups[0][0], ...groups.slice(1).map(([r]) => r).sort((a, b) => b - a)],
-      name: "一对",
+      name: "One pair",
     };
   }
-  return { score: [0, ...ranks], name: "高牌" };
+  return { score: [0, ...ranks], name: "High card" };
 }
 
 function evaluate(cards: Card[]): Eval {
-  if (cards.length < 5) return { score: [0], name: "未成牌" };
+  if (cards.length < 5) return { score: [0], name: "No made hand" };
   let best: Eval = { score: [-1], name: "" };
   for (let a = 0; a < cards.length - 4; a += 1)
     for (let b = a + 1; b < cards.length - 3; b += 1)
@@ -268,7 +268,7 @@ function estimateMultiwayEquity(hole: Card[], board: Card[], opponents: number, 
 function createSixScenario(previous?: SixScenario, settings: TableSettings = defaultSettings): SixScenario {
   const deck = shuffledDeck();
   const hero = deck.splice(0, 2);
-  const names = ["岩石", "观察者", "进攻手", "稳健派", "变速手"];
+  const names = ["Rock", "Observer", "Aggressor", "Steady", "Gearshift"];
   const allPositions = ["UTG", "HJ", "CO", "BTN", "SB", "BB"];
   const heroPosition = allPositions[Math.floor(Math.random() * allPositions.length)];
   const botPositions = allPositions.filter((position) => position !== heroPosition);
@@ -299,7 +299,7 @@ function createSixScenario(previous?: SixScenario, settings: TableSettings = def
   const starting = settings.stackBB * BB;
   const seats: SixSeat[] = names.map((name, index) => {
     const active = activeIndexes.includes(index);
-    const action = !active ? "弃牌" : facingBet && index === activeIndexes[0] ? `下注 ${baseBet}` : facingBet ? "跟注" : "过牌";
+    const action = !active ? "Folded" : facingBet && index === activeIndexes[0] ? `Bet ${baseBet}` : facingBet ? "Called" : "Checked";
     return {
       id: `bot-${index}`,
       name,
@@ -637,12 +637,12 @@ function Metric({ label, value, muted }: { label: string; value: string; muted?:
 }
 
 const beginnerSteps = [
-  { short: "认识牌", title: "扑克牌，其实只有两个信息", kicker: "第 1 关 · 先别管德州" },
-  { short: "怎么赢", title: "德州的目标：凑出最好的 5 张", kicker: "第 2 关 · 游戏目标" },
-  { short: "发几次牌", title: "一手牌，要经过四个小回合", kicker: "第 3 关 · 游戏流程" },
-  { short: "四个按钮", title: "轮到你时，只需要选四种动作", kicker: "第 4 关 · 怎么操作" },
-  { short: "牌型大小", title: "先记住最常见的三种牌型", kicker: "第 5 关 · 怎么比大小" },
-  { short: "第一次决定", title: "来做一个完全看得懂的决定", kicker: "最后一关 · 试一试" },
+  { short: "Meet the cards", title: "Every card has just two pieces of information", kicker: "Lesson 1 · Before poker" },
+  { short: "How to win", title: "Your goal: make the best five cards", kicker: "Lesson 2 · The goal" },
+  { short: "The streets", title: "A hand unfolds over four small rounds", kicker: "Lesson 3 · The flow" },
+  { short: "Four actions", title: "You only need four actions", kicker: "Lesson 4 · What to do" },
+  { short: "Hand rankings", title: "Start with the three most common hands", kicker: "Lesson 5 · Comparing hands" },
+  { short: "First decision", title: "Make a decision you can fully understand", kicker: "Final lesson · Try it" },
 ];
 
 function BeginnerCourse({ onStart }: { onStart: () => void }) {
@@ -661,13 +661,13 @@ function BeginnerCourse({ onStart }: { onStart: () => void }) {
       <aside className="lesson-nav">
         <div>
           <p className="eyebrow">ZERO TO FIRST HAND</p>
-          <h1>从第一张牌<br />开始学</h1>
-          <p>不背术语，不考数学。每一页只学一件事。</p>
+          <h1>Start with your<br />first card</h1>
+          <p>No jargon to memorize. No math exam. One idea per page.</p>
         </div>
         <ol>
           {beginnerSteps.map((item, index) => (
             <li key={item.short} className={index === step ? "current" : index < step ? "done" : ""}>
-              <button onClick={() => move(index)} aria-label={`第${index + 1}关：${item.short}`}>
+              <button onClick={() => move(index)} aria-label={`Lesson ${index + 1}: ${item.short}`}>
                 <b>{index < step ? "✓" : index + 1}</b><span>{item.short}</span>
               </button>
             </li>
@@ -685,24 +685,24 @@ function BeginnerCourse({ onStart }: { onStart: () => void }) {
 
         {step === 0 && (
           <div className="lesson-body">
-            <p className="plain-lead">看一张牌，只看<strong>数字</strong>和<strong>花色</strong>。数字决定大小，花色只是分类。</p>
+            <p className="plain-lead">A card has a <strong>rank</strong> and a <strong>suit</strong>. Rank decides strength; suit is just a category.</p>
             <div className="suit-grid">
-              <div className="black-suit"><b>♠</b><span>黑桃</span></div>
-              <div className="red-suit"><b>♥</b><span>红桃</span></div>
-              <div className="red-suit"><b>♦</b><span>方块</span></div>
-              <div className="black-suit"><b>♣</b><span>梅花</span></div>
+              <div className="black-suit"><b>♠</b><span>Spades</span></div>
+              <div className="red-suit"><b>♥</b><span>Hearts</span></div>
+              <div className="red-suit"><b>♦</b><span>Diamonds</span></div>
+              <div className="black-suit"><b>♣</b><span>Clubs</span></div>
             </div>
             <div className="rank-ladder">
-              <span>小</span>
+              <span>Low</span>
               <div>2</div><div>3</div><div>4</div><div>5</div><div>6</div><div>7</div><div>8</div><div>9</div><div>10</div><div>J</div><div>Q</div><div>K</div><div className="ace">A</div>
-              <span>大</span>
+              <span>High</span>
             </div>
-            <div className="remember"><b>只记一句：</b>A 最大，K 第二；四种花色没有谁更厉害。</div>
+            <div className="remember"><b>Remember one thing:</b> A is highest, then K. No suit is stronger than another.</div>
             <div className="tiny-quiz">
-              <div><span>点一下更大的牌：</span><strong>A 和 K，谁大？</strong></div>
+              <div><span>Tap the higher card:</span><strong>Which is higher, A or K?</strong></div>
               <button className={answer === "a" ? "correct" : ""} onClick={() => setAnswer("a")}>A</button>
               <button className={answer === "k" ? "wrong" : ""} onClick={() => setAnswer("k")}>K</button>
-              {answer && <p>{answer === "a" ? "答对了。A 是普通比较中最大的单张。" : "再看看上面的大小顺序：A 排在 K 后面，所以 A 更大。"}</p>}
+              {answer && <p>{answer === "a" ? "Correct. An ace is the highest single rank." : "Look at the order again: A comes after K, so A is higher."}</p>}
             </div>
           </div>
         )}
@@ -799,10 +799,10 @@ function BeginnerCourse({ onStart }: { onStart: () => void }) {
         )}
 
         <div className="lesson-controls">
-          <button disabled={step === 0} onClick={() => move(step - 1)}>← 上一关</button>
+          <button disabled={step === 0} onClick={() => move(step - 1)}>← Previous lesson</button>
           {step < beginnerSteps.length - 1
-            ? <button className="next-lesson" onClick={() => move(step + 1)}>下一关：{beginnerSteps[step + 1].short} →</button>
-            : <button className="next-lesson" onClick={onStart}>进入牌桌 →</button>}
+            ? <button className="next-lesson" onClick={() => move(step + 1)}>Next: {beginnerSteps[step + 1].short} →</button>
+            : <button className="next-lesson" onClick={onStart}>Enter the table →</button>}
         </div>
       </div>
     </section>
@@ -1211,14 +1211,14 @@ export default function PokerTrainer() {
   return (
     <main>
       <header className="topbar">
-        <a className="brand" href="#top" aria-label="德州研习室首页">
+        <a className="brand" href="#top" aria-label="Hold'em Dojo home">
           <span className="brand-mark">D</span>
-          <span>德州研习室<small>Hold&apos;em Dojo</small></span>
+          <span>Hold&apos;em Dojo<small>Learn by playing</small></span>
         </a>
-        <nav aria-label="主导航">
-          <button className={tab === "learn" ? "active" : ""} onClick={() => setTab("learn")}>从零开始</button>
-          <button className={tab === "setup" ? "active" : ""} onClick={() => setTab("setup")}>仿真设置</button>
-          <button className={tab === "table" ? "active" : ""} onClick={() => setTab("table")}>牌桌练习</button>
+        <nav aria-label="Main navigation">
+          <button className={tab === "learn" ? "active" : ""} onClick={() => setTab("learn")}>Start from zero</button>
+          <button className={tab === "setup" ? "active" : ""} onClick={() => setTab("setup")}>Table setup</button>
+          <button className={tab === "table" ? "active" : ""} onClick={() => setTab("table")}>Heads-up practice</button>
           <button
             className={tab === "six" ? "active" : ""}
             onClick={() => {
@@ -1227,10 +1227,10 @@ export default function PokerTrainer() {
               setTab("six");
             }}
           >
-            六人桌
+            Six-max
           </button>
         </nav>
-        <div className="header-note"><span></span>纯单机 · 无真钱</div>
+        <div className="header-note"><span></span>Solo practice · No real money</div>
       </header>
 
       {tab === "table" ? (
@@ -1416,9 +1416,9 @@ export default function PokerTrainer() {
       )}
 
       <footer>
-        <div><span className="brand-mark">D</span><strong>德州研习室</strong></div>
-        <p>学习概率与策略，不提供充值、匹配、排行榜或真钱玩法。</p>
-        <button onClick={() => { setSettings(defaultSettings); setGame(startHand(undefined, defaultSettings)); setTab("learn"); }}>重新从零学习</button>
+        <div><span className="brand-mark">D</span><strong>Hold&apos;em Dojo</strong></div>
+        <p>Learn probability and strategy. No deposits, matchmaking, leaderboards, or real-money play.</p>
+        <button onClick={() => { setSettings(defaultSettings); setGame(startHand(undefined, defaultSettings)); setTab("learn"); }}>Restart from zero</button>
       </footer>
     </main>
   );

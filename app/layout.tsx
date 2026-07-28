@@ -1,33 +1,26 @@
 import type { Metadata } from "next";
-import { headers } from "next/headers";
 import "./globals.css";
 
-export async function generateMetadata(): Promise<Metadata> {
-  const requestHeaders = await headers();
-  const host = requestHeaders.get("host") ?? "holdem-dojo-cn.taitingding.chatgpt.site";
-  const protocol = requestHeaders.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
-  const image = `${protocol}://${host}/og.png`;
+export function generateMetadata(): Metadata {
   return {
-    title: "德州研习室｜从零开始学德州扑克",
-    description: "连扑克牌都不认识也能学：零基础课程、三档 AI、单挑与六人桌训练、现金桌与锦标赛仿真，不涉及真钱。",
+    title: "Hold'em Dojo | Learn Texas Hold'em from Zero",
+    description: "Learn Texas Hold'em from your first card: beginner lessons, three AI levels, heads-up and six-max training, with no real money.",
     icons: { icon: "/favicon.svg" },
     openGraph: {
-      title: "德州研习室",
-      description: "从零认识第一张牌，再学会第一手德州。",
-      images: [{ url: image, width: 1672, height: 941, alt: "德州研习室：从零认识第一张牌" }],
+      title: "Hold'em Dojo",
+      description: "Meet your first card, then learn your first hand.",
     },
     twitter: {
       card: "summary_large_image",
-      title: "德州研习室",
-      description: "从零认识第一张牌，再学会第一手德州。",
-      images: [image],
+      title: "Hold'em Dojo",
+      description: "Meet your first card, then learn your first hand.",
     },
   };
 }
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="zh-CN">
+    <html lang="en">
       <body>{children}</body>
     </html>
   );

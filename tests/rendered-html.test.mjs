@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
-import { access, readFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
-
-const templateRoot = new URL("../", import.meta.url);
 
 async function render() {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
@@ -31,11 +29,10 @@ test("server-renders the Hold'em Dojo document shell", async () => {
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<html lang="zh-CN">/i);
-  assert.match(html, /<title>德州研习室｜从零开始学德州扑克<\/title>/);
-  assert.match(html, /不涉及真钱/);
-  assert.match(html, /og\.png/);
-  assert.match(html, /从第一张牌/);
+  assert.match(html, /<html lang="en">/i);
+  assert.match(html, /<title>Hold&#x27;em Dojo \| Learn Texas Hold&#x27;em from Zero<\/title>/);
+  assert.match(html, /No real money/i);
+  assert.match(html, /Start with your<br\/>first card/);
   assert.doesNotMatch(html, /Your site is taking shape|react-loading-skeleton|codex-preview/i);
 });
 
@@ -50,10 +47,9 @@ test("keeps the public release focused on the learning product", async () => {
 
   assert.match(trainer, /function BeginnerCourse/);
   assert.match(trainer, /function SixMaxTrainer/);
-  assert.match(trainer, /不提供充值、匹配、排行榜或真钱玩法/);
+  assert.match(trainer, /No deposits, matchmaking, leaderboards, or real-money play/);
   assert.match(page, /<PokerTrainer \/>/);
-  assert.match(layout, /lang="zh-CN"/);
+  assert.match(layout, /lang="en"/);
   assert.match(packageJson, /"test": "npm run build && node --test tests\/rendered-html\.test\.mjs"/);
-  assert.match(readme, /不提供充值、匹配、排行榜或真钱玩法/);
-  await access(new URL("public/og.png", templateRoot));
+  assert.match(readme, /no deposits, matchmaking, leaderboard, or real-money play/i);
 });

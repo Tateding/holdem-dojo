@@ -1,28 +1,30 @@
-# 德州研习室
+# Hold'em Dojo
 
-一个面向零基础学习者的单机德州扑克练习工具。它从认识扑克牌开始，带你理解盲注、跟注、过牌、弃牌与摊牌，并通过练习桌把规则变成可操作的判断。
+An approachable, browser-based Texas Hold'em learning tool for complete beginners. Start by learning the cards, then understand blinds, calling, checking, folding, and showdown through playable practice tables.
 
-本项目不提供充值、匹配、排行榜或真钱玩法；它是学习与练习工具，不是赌博产品。
+**Live site:** [holdem-dojo-cn.taitingding.chatgpt.site](https://holdem-dojo-cn.taitingding.chatgpt.site)
 
-## 已包含的内容
+Hold'em Dojo has no deposits, matchmaking, leaderboard, or real-money play. It is a learning and practice product, not a gambling product.
 
-- 从零开始：牌面、胜负、四个阶段和基础动作的入门课程。
-- 单挑练习：现金桌、锦标赛、补码与三档策略型 AI。
-- 六人决策训练：在随机多人场景中根据位置、底池与对手行动作出选择。
-- 可关闭的教练提示：方便先独立思考，再查看胜率、底池赔率与复盘。
+## Included
 
-> 六人模块是“多人决策训练”，不是连续完整的六人现金桌模拟；暂不处理多路边池等完整牌局规则。
+- A zero-to-first-hand course covering cards, winning, streets, actions, and hand rankings.
+- Heads-up practice with cash games, tournaments, rebuys, and three strategy-AI difficulty levels.
+- Six-max decision training with changing positions, prior actions, and multiway decisions.
+- A closable coach panel for equity, pot-odds, and hand reviews after you decide.
 
-## 本地运行
+> Six-max is decision training, not a continuous full-ring cash-game simulator. It does not yet model side pots or every multiway rule.
 
-需要 Node.js 22.13 或更高版本。
+## Run locally
+
+Requires Node.js 22.13 or later.
 
 ```bash
 npm install
 npm run dev
 ```
 
-## 验证与发布
+## Verify and publish
 
 ```bash
 npm run lint
@@ -30,11 +32,7 @@ npm test
 npm run build
 ```
 
-- `npm run lint`：检查 React 与 TypeScript 代码质量。
-- `npm test`：构建后检查页面标题、中文语言设置、非真钱定位与发布资源。
-- `npm run build`：生成生产环境构建。
+## Product boundaries
 
-## 产品边界
-
-- AI 是用于练习的策略型对手，不是 GTO 求解器或真人水平的职业扑克机器人。
-- 练习统计只保存在当前设备的浏览器本地存储中。
+- The AI is a practice-oriented strategy opponent, not a GTO solver or professional human-level bot.
+- Practice statistics remain only in the current browser's local storage.
