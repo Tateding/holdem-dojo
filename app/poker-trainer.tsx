@@ -84,6 +84,23 @@ type Game = {
 
 type Eval = { score: number[]; name: string };
 
+const emptyStats = { hands: 0, good: 0 };
+
+function initialStats() {
+  if (typeof window === "undefined") return emptyStats;
+  try {
+    const saved = window.localStorage.getItem("holdem-dojo-stats");
+    if (!saved) return emptyStats;
+    const parsed = JSON.parse(saved) as { hands?: unknown; good?: unknown };
+    return {
+      hands: typeof parsed.hands === "number" ? parsed.hands : 0,
+      good: typeof parsed.good === "number" ? parsed.good : 0,
+    };
+  } catch {
+    return emptyStats;
+  }
+}
+
 const SB = 5;
 const BB = 10;
 const defaultSettings: TableSettings = {
@@ -932,17 +949,13 @@ function SixMaxTrainer({
   onCoachOpen: (open: boolean) => void;
   onSetup: () => void;
 }) {
-  const [scenario, setScenario] = useState<SixScenario | null>(null);
-
-  useEffect(() => {
-    setScenario(createSixScenario(undefined, settings));
-  }, [settings]);
+  const [scenario, setScenario] = useState<SixScenario>(() => createSixScenario(undefined, settings));
 
   const activeOpponents = scenario?.seats.filter((seat) => seat.active).length ?? 1;
   const samples = settings.difficulty === "guide" ? 160 : settings.difficulty === "standard" ? 380 : 760;
   const equity = useMemo(
     () => scenario ? estimateMultiwayEquity(scenario.hero, scenario.board, activeOpponents, samples) : 0,
-    [scenario?.hero, scenario?.board, activeOpponents, samples],
+    [scenario, activeOpponents, samples],
   );
   const advice = scenario ? sixRecommendation(scenario, equity) : null;
   const potOdds = scenario?.toCall ? scenario.toCall / (scenario.pot + scenario.toCall) : 0;
@@ -1068,19 +1081,13 @@ function SixMaxTrainer({
 }
 
 export default function PokerTrainer() {
-  const [game, setGame] = useState<Game | null>(null);
+  const [game, setGame] = useState<Game>(() => startHand(undefined, defaultSettings));
   const [tab, setTab] = useState<"table" | "six" | "learn" | "setup">("learn");
   const [showHints, setShowHints] = useState(true);
   const [coachOpen, setCoachOpen] = useState(true);
-  const [stats, setStats] = useState({ hands: 0, good: 0 });
+  const [stats, setStats] = useState(initialStats);
   const [settings, setSettings] = useState<TableSettings>(defaultSettings);
   const [tendencies, setTendencies] = useState<Tendencies>({ decisions: 0, folds: 0, calls: 0, raises: 0 });
-
-  useEffect(() => {
-    setGame(startHand(undefined, defaultSettings));
-    const saved = window.localStorage.getItem("holdem-dojo-stats");
-    if (saved) setStats(JSON.parse(saved));
-  }, []);
 
   useEffect(() => {
     if (!game || game.turn !== "bot" || game.street === "complete") return;
@@ -1092,7 +1099,7 @@ export default function PokerTrainer() {
   const equity = useMemo(() => {
     if (!game) return 0.5;
     return estimateEquity(game.hero, game.board, 300);
-  }, [game?.hero, game?.board]);
+  }, [game]);
 
   const due = game ? Math.max(0, game.currentBet - game.pips.hero) : 0;
   const potOdds = game && due ? due / (game.pot + due) : 0;
