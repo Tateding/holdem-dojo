@@ -23,6 +23,7 @@
 *.pem
 .binding-quarantine/
 .devserver.*
+.openai/*.tar.gz
 
 # debug
 npm-debug.log*

@@ -177,10 +177,10 @@ function startHand(previous?: Game): Game {
     handNo, deck, hero, bot, board: [], dealer, street: "preflop", turn: dealer,
     pot: SB + BB, finalPot: 0, stacks, pips, currentBet: BB, minRaise: BB,
     raises: 0, acted: { hero: false, bot: false },
-    history: [`第 ${handNo} 手：${dealer === "hero" ? "你" : "AI"} 在按钮位，小盲 ${SB} / 大盲 ${BB}`],
+    history: [`第 ${handNo} 手：${dealer === "hero" ? "你" : "AI"} 先放 ${SB}，另一方先放 ${BB}`],
     note: dealer === "hero"
-      ? "你在按钮位：翻牌前先行动，翻牌后拥有位置优势。"
-      : "你在大盲位：翻牌前最后行动，但翻牌后要先说话。",
+      ? "这一手你有 D 标记。桌上发出公共牌后，对手会先选，你可以看完他的动作再决定。"
+      : "这一手对手有 D 标记。桌上发出公共牌后，你需要先做决定。",
     outcome: "", revealBot: false,
   };
 }
@@ -229,8 +229,8 @@ function advanceStreet(game: Game): Game {
     minRaise: BB, raises: 0, acted: { hero: false, bot: false },
     history: [...next.history, `${streetName[street]}发牌`],
     note: first === "hero"
-      ? "你处于不利位置，需要先行动；用更强、更清晰的范围继续。"
-      : "AI 先行动，你拥有位置：先获得信息，再做决定。",
+      ? "公共牌已经出现。这一轮你先选，所以还不知道对手准备怎么做。"
+      : "对手先选。等它行动后，你会多知道一条信息。",
   };
 }
 
@@ -246,9 +246,9 @@ function recommendation(game: Game, equity: number) {
     return { key: "fold", label: "弃牌", reason: `需要约 ${Math.round(potOdds * 100)}% 胜率，你的估算不足。` };
   }
   if (equity >= 0.72 && game.raises < 2) {
-    return { key: "raise", label: "加注", reason: "牌力足够强，可以从跟注范围中榨取价值。" };
+    return { key: "raise", label: "加注", reason: "你的牌很强，可以多放一些筹码，让较弱的牌付出更多。" };
   }
-  return { key: "call", label: "跟注", reason: `你的估算胜率高于约 ${Math.round(potOdds * 100)}% 的底池赔率门槛。` };
+  return { key: "call", label: "跟注", reason: `继续需要大约 ${Math.round(potOdds * 100)}% 的胜率；你目前的估算比它高。` };
 }
 
 function actionFeedback(game: Game, kind: ActionKind, equity: number) {
@@ -292,7 +292,7 @@ function applyAction(game: Game, actor: Player, kind: ActionKind, raiseTo = 0, e
     next.pot += due;
     next.acted[actor] = true;
     next.history.push(`${streetName[next.street]}｜${who}跟注 ${due}`);
-    next.note = actor === "hero" ? feedback : `AI 跟注 ${due}，它的范围通常仍包含中等牌力。`;
+    next.note = actor === "hero" ? feedback : `AI 补了 ${due}，选择继续看后面的牌。`;
   } else {
     const maxTarget = Math.min(
       next.pips[actor] + next.stacks[actor],
@@ -358,9 +358,182 @@ function Metric({ label, value, muted }: { label: string; value: string; muted?:
   return <div className="metric"><span>{label}</span><strong>{value}</strong>{muted && <small>{muted}</small>}</div>;
 }
 
+const beginnerSteps = [
+  { short: "认识牌", title: "扑克牌，其实只有两个信息", kicker: "第 1 关 · 先别管德州" },
+  { short: "怎么赢", title: "德州的目标：凑出最好的 5 张", kicker: "第 2 关 · 游戏目标" },
+  { short: "发几次牌", title: "一手牌，要经过四个小回合", kicker: "第 3 关 · 游戏流程" },
+  { short: "四个按钮", title: "轮到你时，只需要选四种动作", kicker: "第 4 关 · 怎么操作" },
+  { short: "牌型大小", title: "先记住最常见的三种牌型", kicker: "第 5 关 · 怎么比大小" },
+  { short: "第一次决定", title: "来做一个完全看得懂的决定", kicker: "最后一关 · 试一试" },
+];
+
+function BeginnerCourse({ onStart }: { onStart: () => void }) {
+  const [step, setStep] = useState(0);
+  const [answer, setAnswer] = useState<string | null>(null);
+  const lesson = beginnerSteps[step];
+
+  function move(next: number) {
+    setAnswer(null);
+    setStep(Math.max(0, Math.min(beginnerSteps.length - 1, next)));
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  return (
+    <section className="beginner-course" id="top">
+      <aside className="lesson-nav">
+        <div>
+          <p className="eyebrow">ZERO TO FIRST HAND</p>
+          <h1>从第一张牌<br />开始学</h1>
+          <p>不背术语，不考数学。每一页只学一件事。</p>
+        </div>
+        <ol>
+          {beginnerSteps.map((item, index) => (
+            <li key={item.short} className={index === step ? "current" : index < step ? "done" : ""}>
+              <button onClick={() => move(index)} aria-label={`第${index + 1}关：${item.short}`}>
+                <b>{index < step ? "✓" : index + 1}</b><span>{item.short}</span>
+              </button>
+            </li>
+          ))}
+        </ol>
+        <div className="course-progress"><i style={{ width: `${((step + 1) / beginnerSteps.length) * 100}%` }}></i></div>
+        <small>{step + 1} / {beginnerSteps.length}</small>
+      </aside>
+
+      <div className="lesson-card">
+        <div className="lesson-heading">
+          <p className="eyebrow">{lesson.kicker}</p>
+          <h2>{lesson.title}</h2>
+        </div>
+
+        {step === 0 && (
+          <div className="lesson-body">
+            <p className="plain-lead">看一张牌，只看<strong>数字</strong>和<strong>花色</strong>。数字决定大小，花色只是分类。</p>
+            <div className="suit-grid">
+              <div className="black-suit"><b>♠</b><span>黑桃</span></div>
+              <div className="red-suit"><b>♥</b><span>红桃</span></div>
+              <div className="red-suit"><b>♦</b><span>方块</span></div>
+              <div className="black-suit"><b>♣</b><span>梅花</span></div>
+            </div>
+            <div className="rank-ladder">
+              <span>小</span>
+              <div>2</div><div>3</div><div>4</div><div>5</div><div>6</div><div>7</div><div>8</div><div>9</div><div>10</div><div>J</div><div>Q</div><div>K</div><div className="ace">A</div>
+              <span>大</span>
+            </div>
+            <div className="remember"><b>只记一句：</b>A 最大，K 第二；四种花色没有谁更厉害。</div>
+            <div className="tiny-quiz">
+              <div><span>点一下更大的牌：</span><strong>A 和 K，谁大？</strong></div>
+              <button className={answer === "a" ? "correct" : ""} onClick={() => setAnswer("a")}>A</button>
+              <button className={answer === "k" ? "wrong" : ""} onClick={() => setAnswer("k")}>K</button>
+              {answer && <p>{answer === "a" ? "答对了。A 是普通比较中最大的单张。" : "再看看上面的大小顺序：A 排在 K 后面，所以 A 更大。"}</p>}
+            </div>
+          </div>
+        )}
+
+        {step === 1 && (
+          <div className="lesson-body">
+            <p className="plain-lead">你手里有 <strong>2 张自己的牌</strong>，桌上最多出现 <strong>5 张大家共用的牌</strong>。</p>
+            <div className="seven-card-demo">
+              <div className="card-group"><span>只给你的</span><div><CardView card={{ rank: 14, suit: "♠" }} /><CardView card={{ rank: 14, suit: "♥" }} /></div></div>
+              <b>＋</b>
+              <div className="card-group public"><span>桌上共用的</span><div><CardView card={{ rank: 14, suit: "♦" }} /><CardView card={{ rank: 9, suit: "♣" }} /><CardView card={{ rank: 6, suit: "♠" }} /><CardView card={{ rank: 3, suit: "♥" }} /><CardView card={{ rank: 2, suit: "♣" }} /></div></div>
+            </div>
+            <div className="simple-equation">
+              <span>一共能看到 7 张</span><b>→</b><strong>自动挑出最好的 5 张</strong>
+            </div>
+            <p className="friendly-note">不用自己拖动选牌，游戏会自动帮你判断。上面的例子里，你有三个 A，叫作“三条”。</p>
+            <div className="two-ways">
+              <article><b>方法 1</b><h3>比牌赢</h3><p>最后还没退出的人亮牌，5 张组合更大的人赢。</p></article>
+              <article><b>方法 2</b><h3>让对手先退出</h3><p>如果其他人都选择弃牌，你不用亮牌也能赢。</p></article>
+            </div>
+          </div>
+        )}
+
+        {step === 2 && (
+          <div className="lesson-body">
+            <p className="plain-lead">不是一下发完。桌上的公共牌会分 <strong>3 次</strong>出现，中间大家都能重新决定。</p>
+            <div className="round-road">
+              <article><b>①</b><span>开始</span><h3>每人 2 张</h3><p>桌上还没有公共牌</p><div className="road-cards"><i></i><i></i></div></article>
+              <article><b>②</b><span>翻牌</span><h3>桌上发 3 张</h3><p>第一次看到公共牌</p><div className="road-cards"><i></i><i></i><i></i></div></article>
+              <article><b>③</b><span>转牌</span><h3>再发 1 张</h3><p>桌上现在共 4 张</p><div className="road-cards single"><i></i></div></article>
+              <article><b>④</b><span>河牌</span><h3>最后 1 张</h3><p>桌上最终共 5 张</p><div className="road-cards single"><i></i></div></article>
+            </div>
+            <div className="remember"><b>把它想成四个小回合：</b>看一下新牌，再决定一次。任何时候都可以退出这一手。</div>
+          </div>
+        )}
+
+        {step === 3 && (
+          <div className="lesson-body">
+            <p className="plain-lead">筹码先当作<strong>游戏分数</strong>。轮到你时，按钮看着多，其实只有下面四个意思。</p>
+            <div className="action-dictionary">
+              <article className="fold-card"><b>弃牌</b><span>FOLD</span><p>这手不玩了。已经放进去的分数拿不回来，但不用继续付。</p><em>像：这一题先跳过</em></article>
+              <article><b>过牌</b><span>CHECK</span><p>不加分数，把机会交给下一位。只有没人要求你补分数时才能用。</p><em>像：我先看看</em></article>
+              <article><b>跟注</b><span>CALL</span><p>对手放了多少，你补到一样多，继续看后面的牌。</p><em>像：我跟你一样</em></article>
+              <article className="raise-card"><b>下注 / 加注</b><span>BET / RAISE</span><p>主动多放分数，让对手选择跟上，或者退出。</p><em>像：我把难度提高</em></article>
+            </div>
+            <div className="example-call">
+              <div><span>桌中已有</span><strong>100</strong></div><b>＋</b><div><span>对手刚放</span><strong>20</strong></div><b>→</b><div><span>你想继续，就补</span><strong>20</strong></div>
+            </div>
+          </div>
+        )}
+
+        {step === 4 && (
+          <div className="lesson-body">
+            <p className="plain-lead">先不用背九种牌型。初学时，认出这三种就已经能开始玩。</p>
+            <div className="starter-hands">
+              <article><span>最常见</span><div className="hand-example"><CardView card={{rank:8,suit:"♠"}} small/><CardView card={{rank:8,suit:"♥"}} small/></div><h3>一对</h3><p>两个数字相同。比如两个 8。</p></article>
+              <article><span>排成队</span><div className="text-cards"><i>5</i><i>6</i><i>7</i><i>8</i><i>9</i></div><h3>顺子</h3><p>五个连续数字，花色随意。</p></article>
+              <article><span>同一种花色</span><div className="text-cards red-mini"><i>2♥</i><i>5♥</i><i>8♥</i><i>J♥</i><i>K♥</i></div><h3>同花</h3><p>五张都是同一种花色，数字不必连续。</p></article>
+            </div>
+            <details className="all-ranks">
+              <summary>需要时再看：完整牌型从大到小</summary>
+              <div className="ranking"><b>同花顺</b><b>四条</b><b>葫芦</b><b>同花</b><b>顺子</b><b>三条</b><b>两对</b><b>一对</b><b>高牌</b></div>
+              <p>游戏会自动显示你现在是什么牌型，所以不必一次背完。</p>
+            </details>
+          </div>
+        )}
+
+        {step === 5 && (
+          <div className="lesson-body">
+            <p className="plain-lead">你拿到了<strong>两个 A</strong>——这是最好的起手牌。对手加了 20，你要补 20 才能继续。</p>
+            <div className="first-decision">
+              <div className="decision-cards"><CardView card={{rank:14,suit:"♠"}}/><CardView card={{rank:14,suit:"♥"}}/></div>
+              <div><span>你的牌</span><strong>一对 A</strong><p>现在还没有公共牌</p></div>
+              <div className="decision-cost"><span>继续要补</span><strong>20</strong></div>
+            </div>
+            <div className="decision-question">
+              <h3>你会怎么选？</h3>
+              <button className={answer === "fold" ? "wrong" : ""} onClick={() => setAnswer("fold")}>弃牌</button>
+              <button className={answer === "call" ? "correct" : ""} onClick={() => setAnswer("call")}>跟注</button>
+              <button className={answer === "raise" ? "best" : ""} onClick={() => setAnswer("raise")}>加注</button>
+            </div>
+            {answer && (
+              <div className={`answer-box ${answer === "fold" ? "answer-wrong" : ""}`}>
+                {answer === "raise" && <><strong>最好：加注</strong><p>两个 A 非常强，主动多放分数，常能让较弱的牌付出更多。</p></>}
+                {answer === "call" && <><strong>可以继续，但偏保守</strong><p>跟注不会犯大错；不过这手牌足够强，通常更适合加注。</p></>}
+                {answer === "fold" && <><strong>这次太早退出了</strong><p>两个 A 是最强的起手牌。拿到明显的好牌，应该继续，而不是害怕每一次下注。</p></>}
+              </div>
+            )}
+            <div className="graduation">
+              <div><b>你已经会最小闭环了</b><span>认牌 → 看公共牌 → 选动作 → 比五张组合</span></div>
+              <button className="primary-action" onClick={onStart}>带着中文提示打第一手 →</button>
+            </div>
+          </div>
+        )}
+
+        <div className="lesson-controls">
+          <button disabled={step === 0} onClick={() => move(step - 1)}>← 上一关</button>
+          {step < beginnerSteps.length - 1
+            ? <button className="next-lesson" onClick={() => move(step + 1)}>下一关：{beginnerSteps[step + 1].short} →</button>
+            : <button className="next-lesson" onClick={onStart}>进入牌桌 →</button>}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export default function PokerTrainer() {
   const [game, setGame] = useState<Game | null>(null);
-  const [tab, setTab] = useState<"table" | "learn">("table");
+  const [tab, setTab] = useState<"table" | "learn">("learn");
   const [showHints, setShowHints] = useState(true);
   const [stats, setStats] = useState({ hands: 0, good: 0 });
 
@@ -434,8 +607,8 @@ export default function PokerTrainer() {
           <span>德州研习室<small>Hold&apos;em Dojo</small></span>
         </a>
         <nav aria-label="主导航">
-          <button className={tab === "table" ? "active" : ""} onClick={() => setTab("table")}>牌桌训练</button>
-          <button className={tab === "learn" ? "active" : ""} onClick={() => setTab("learn")}>五分钟入门</button>
+          <button className={tab === "learn" ? "active" : ""} onClick={() => setTab("learn")}>从零开始</button>
+          <button className={tab === "table" ? "active" : ""} onClick={() => setTab("table")}>牌桌练习</button>
         </nav>
         <div className="header-note"><span></span>纯单机 · 无真钱</div>
       </header>
@@ -444,10 +617,10 @@ export default function PokerTrainer() {
         <>
           <section className="hero-strip" id="top">
             <div>
-              <p className="eyebrow">DECISION LAB / 决策实验室</p>
-              <h1>少猜牌，<em>多算一层。</em></h1>
+              <p className="eyebrow">YOUR FIRST TABLE / 第一张练习桌</p>
+              <h1>先看牌，<em>再做选择。</em></h1>
             </div>
-            <p>和一位克制的 AI 打短桌训练局。每次行动都有即时复盘，重点学习范围、位置、赔率和尺度。</p>
+            <p>看不懂术语也没关系。轮到你时只看三件事：手里的牌、继续要付多少、教练建议什么。</p>
           </section>
 
           <section className="workspace">
@@ -533,9 +706,9 @@ export default function PokerTrainer() {
               {showHints ? (
                 <>
                   <div className="metrics">
-                    <Metric label="估算胜率" value={`${Math.round(equity * 100)}%`} muted="vs 随机范围" />
-                    <Metric label="底池赔率" value={due ? `${Math.round(potOdds * 100)}%` : "—"} muted={due ? "跟注门槛" : "无需跟注"} />
-                    <Metric label="位置" value={game.dealer === "hero" ? "按钮位" : "大盲位"} muted={game.dealer === "hero" ? "翻后后行动" : "翻后先行动"} />
+                    <Metric label="大概能赢几次" value={`${Math.round(equity * 100)}%`} muted="同样场面打 100 次" />
+                    <Metric label="继续是否划算" value={due ? `${Math.round(potOdds * 100)}%` : "不用付"} muted={due ? "最低需要的胜率" : "可以免费看牌"} />
+                    <Metric label="谁更晚行动" value={game.dealer === "hero" ? "你" : "对手"} muted="晚行动能多看一步" />
                   </div>
                   <div className="advice">
                     <span>当前建议</span>
@@ -553,6 +726,15 @@ export default function PokerTrainer() {
               <details>
                 <summary>查看行动记录</summary>
                 <ol>{game.history.slice().reverse().map((item, i) => <li key={`${item}${i}`}>{item}</li>)}</ol>
+              </details>
+              <details className="plain-glossary">
+                <summary>看不懂词？点开人话词典</summary>
+                <dl>
+                  <div><dt>底池</dt><dd>桌子中间、这一手要争夺的全部筹码。</dd></div>
+                  <div><dt>跟注</dt><dd>补到和对手一样多，继续玩这一手。</dd></div>
+                  <div><dt>胜率</dt><dd>相同场面重复很多次，你大概能赢几次。</dd></div>
+                  <div><dt>位置</dt><dd>谁先做决定。越晚决定，看到的信息越多。</dd></div>
+                </dl>
               </details>
               <div className="progress">
                 <div><span>本机练习</span><strong>{stats.hands} 手</strong></div>
@@ -574,27 +756,13 @@ export default function PokerTrainer() {
           </section>
         </>
       ) : (
-        <section className="learn-page">
-          <div className="learn-intro">
-            <p className="eyebrow">TEXAS HOLD&apos;EM / 从零开始</p>
-            <h1>五分钟看懂一手德州</h1>
-            <p>每人两张底牌，桌面最多发五张公共牌。你从七张牌中选出最强的五张组合；也可以在摊牌前让所有对手弃牌。</p>
-            <button className="primary-action" onClick={() => setTab("table")}>进入练习牌桌 →</button>
-          </div>
-          <div className="lesson-stack">
-            <article><span>01 / 发牌</span><h2>两张底牌，只属于你</h2><p>小盲和大盲先投入强制下注，形成初始底池。按钮位每手顺时针轮换；单挑时，按钮位同时是小盲。</p><div className="mini-cards"><CardView card={{rank:14,suit:"♠"}} small/><CardView card={{rank:13,suit:"♠"}} small/><b>AK 同花</b></div></article>
-            <article><span>02 / 四轮行动</span><h2>翻前 → 翻牌 → 转牌 → 河牌</h2><div className="street-line"><i>2张底牌</i><b>→</b><i>3张翻牌</i><b>→</b><i>1张转牌</i><b>→</b><i>1张河牌</i></div><p>每轮可以弃牌、过牌、跟注、下注或加注。真实牌局允许继续反加；训练桌每轮最多三次加注，方便初学者聚焦。</p></article>
-            <article><span>03 / 牌型</span><h2>从大到小，先比类别</h2><div className="ranking"><b>同花顺</b><b>四条</b><b>葫芦</b><b>同花</b><b>顺子</b><b>三条</b><b>两对</b><b>一对</b><b>高牌</b></div><p>类别相同，再比较组成牌型的点数。花色没有大小之分；A 既可在 AKQJ10 中作最大牌，也可在 A2345 中作 1。</p></article>
-            <article><span>04 / 数学</span><h2>底池赔率是第一把尺</h2><div className="formula"><strong>跟注成本</strong><b>÷</b><strong>跟注后的总底池</strong><b>=</b><strong>最低胜率</strong></div><p>例如底池 100，对手下注 50：你付 50，跟注后底池 200，最低胜率是 25%。估算胜率高于它，跟注才有直接盈利空间。</p></article>
-            <article><span>05 / 博弈</span><h2>范围比“读心”更可靠</h2><p>紧手玩家在前位加注，范围通常较强；按钮位小加注，范围可能很宽。观察位置、下注尺度和前序行动，用证据持续更新范围。</p><blockquote>好决策不保证这一手赢；它保证同样场景重复很多次后，你会赢得更多。</blockquote></article>
-          </div>
-        </section>
+        <BeginnerCourse onStart={() => setTab("table")} />
       )}
 
       <footer>
         <div><span className="brand-mark">D</span><strong>德州研习室</strong></div>
         <p>学习概率与策略，不提供充值、匹配、排行榜或真钱玩法。</p>
-        <button onClick={() => { setGame(startHand()); setTab("table"); }}>重置练习</button>
+        <button onClick={() => { setGame(startHand()); setTab("learn"); }}>重新从零学习</button>
       </footer>
     </main>
   );
