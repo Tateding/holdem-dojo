@@ -70,9 +70,6 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 }
 .topbar nav button.active { background: var(--ink); color: var(--paper); }
 .header-note { display: flex; gap: 8px; align-items: center; color: var(--muted); font-size: 12px; }
-.language-switch { display: flex; padding: 3px; gap: 2px; border: 1px solid var(--line); border-radius: 999px; }
-.language-switch button { border: 0; background: transparent; color: var(--muted); border-radius: 999px; padding: 4px 8px; font-size: 12px; cursor: pointer; }
-.language-switch button.active { background: var(--ink); color: var(--paper); }
 .header-note span { width: 8px; height: 8px; border-radius: 50%; background: #58a773; box-shadow: 0 0 0 4px rgba(88,167,115,.14); }
 
 .hero-strip {
@@ -788,7 +785,6 @@ footer button { background: transparent; border: 0; text-decoration: underline; 
 @media (max-width: 720px) {
   .topbar { height: auto; min-height: 70px; flex-wrap: wrap; padding-top: 10px; padding-bottom: 10px; gap: 8px; }
   .header-note { display: none; }
-  .language-switch { margin-left: auto; }
   .topbar nav { order: 3; width: 100%; }
   .topbar nav button { flex: 1; }
   .hero-strip { grid-template-columns: 1fr; gap: 20px; padding-top: 40px; }
