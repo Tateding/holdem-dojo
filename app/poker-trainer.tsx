@@ -1082,12 +1082,17 @@ function SixMaxTrainer({
 
 export default function PokerTrainer() {
   const [game, setGame] = useState<Game>(() => startHand(undefined, defaultSettings));
+  const [language, setLanguage] = useState<"zh" | "en">("zh");
   const [tab, setTab] = useState<"table" | "six" | "learn" | "setup">("learn");
   const [showHints, setShowHints] = useState(true);
   const [coachOpen, setCoachOpen] = useState(true);
   const [stats, setStats] = useState(initialStats);
   const [settings, setSettings] = useState<TableSettings>(defaultSettings);
   const [tendencies, setTendencies] = useState<Tendencies>({ decisions: 0, folds: 0, calls: 0, raises: 0 });
+
+  useEffect(() => {
+    document.documentElement.lang = language === "zh" ? "zh-CN" : "en";
+  }, [language]);
 
   useEffect(() => {
     if (!game || game.turn !== "bot" || game.street === "complete") return;
@@ -1211,14 +1216,14 @@ export default function PokerTrainer() {
   return (
     <main>
       <header className="topbar">
-        <a className="brand" href="#top" aria-label="Hold'em Dojo home">
+        <a className="brand" href="#top" aria-label={language === "zh" ? "德州研习室首页" : "Hold'em Dojo home"}>
           <span className="brand-mark">D</span>
-          <span>Hold&apos;em Dojo<small>Learn by playing</small></span>
+          <span>{language === "zh" ? "德州研习室" : "Hold'em Dojo"}<small>{language === "zh" ? "边玩边学" : "Learn by playing"}</small></span>
         </a>
-        <nav aria-label="Main navigation">
-          <button className={tab === "learn" ? "active" : ""} onClick={() => setTab("learn")}>Start from zero</button>
-          <button className={tab === "setup" ? "active" : ""} onClick={() => setTab("setup")}>Table setup</button>
-          <button className={tab === "table" ? "active" : ""} onClick={() => setTab("table")}>Heads-up practice</button>
+        <nav aria-label={language === "zh" ? "主导航" : "Main navigation"}>
+          <button className={tab === "learn" ? "active" : ""} onClick={() => setTab("learn")}>{language === "zh" ? "从零开始" : "Start from zero"}</button>
+          <button className={tab === "setup" ? "active" : ""} onClick={() => setTab("setup")}>{language === "zh" ? "仿真设置" : "Table setup"}</button>
+          <button className={tab === "table" ? "active" : ""} onClick={() => setTab("table")}>{language === "zh" ? "牌桌练习" : "Heads-up practice"}</button>
           <button
             className={tab === "six" ? "active" : ""}
             onClick={() => {
@@ -1227,10 +1232,14 @@ export default function PokerTrainer() {
               setTab("six");
             }}
           >
-            Six-max
+            {language === "zh" ? "六人桌" : "Six-max"}
           </button>
         </nav>
-        <div className="header-note"><span></span>Solo practice · No real money</div>
+        <div className="language-switch" aria-label={language === "zh" ? "语言切换" : "Language selector"}>
+          <button className={language === "zh" ? "active" : ""} onClick={() => setLanguage("zh")}>中文</button>
+          <button className={language === "en" ? "active" : ""} onClick={() => setLanguage("en")}>EN</button>
+        </div>
+        <div className="header-note"><span></span>{language === "zh" ? "纯单机 · 无真钱" : "Solo practice · No real money"}</div>
       </header>
 
       {tab === "table" ? (
