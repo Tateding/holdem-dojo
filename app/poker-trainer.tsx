@@ -7,6 +7,23 @@ type Card = { rank: number; suit: Suit };
 type Player = "hero" | "bot";
 type Street = "preflop" | "flop" | "turn" | "river" | "complete";
 type ActionKind = "fold" | "check" | "call" | "raise";
+type Difficulty = "guide" | "standard" | "advanced";
+type MatchMode = "cash" | "tournament";
+type RebuyMode = "auto" | "manual" | "off";
+
+type TableSettings = {
+  difficulty: Difficulty;
+  mode: MatchMode;
+  stackBB: 50 | 100 | 200;
+  rebuy: RebuyMode;
+};
+
+type Tendencies = {
+  decisions: number;
+  folds: number;
+  calls: number;
+  raises: number;
+};
 
 type Game = {
   handNo: number;
@@ -29,13 +46,24 @@ type Game = {
   note: string;
   outcome: string;
   revealBot: boolean;
+  smallBlind: number;
+  bigBlind: number;
+  startingStack: number;
+  settings: TableSettings;
+  matchOver: boolean;
+  rebuyPending: boolean;
 };
 
 type Eval = { score: number[]; name: string };
 
-const STARTING_STACK = 1000;
 const SB = 5;
 const BB = 10;
+const defaultSettings: TableSettings = {
+  difficulty: "guide",
+  mode: "cash",
+  stackBB: 100,
+  rebuy: "auto",
+};
 const rankText: Record<number, string> = {
   14: "A", 13: "K", 12: "Q", 11: "J", 10: "10", 9: "9", 8: "8",
   7: "7", 6: "6", 5: "5", 4: "4", 3: "3", 2: "2",
@@ -157,32 +185,48 @@ function estimateEquity(hole: Card[], board: Card[], samples = 240) {
   return points / samples;
 }
 
-function startHand(previous?: Game): Game {
+function blindsForHand(settings: TableSettings, handNo: number) {
+  if (settings.mode === "cash") return { smallBlind: SB, bigBlind: BB, level: 1 };
+  const level = Math.floor((handNo - 1) / 5) + 1;
+  const bigBlind = Math.min(160, BB * 2 ** (level - 1));
+  return { smallBlind: Math.max(5, Math.floor(bigBlind / 2)), bigBlind, level };
+}
+
+function startHand(previous?: Game, chosenSettings?: TableSettings): Game {
+  const settings = chosenSettings ?? previous?.settings ?? defaultSettings;
   const deck = shuffledDeck();
   const handNo = (previous?.handNo ?? 0) + 1;
+  const { smallBlind, bigBlind, level } = blindsForHand(settings, handNo);
+  const startingStack = settings.stackBB * BB;
   const dealer: Player = handNo % 2 === 1 ? "hero" : "bot";
   const stacks = previous
     ? { ...previous.stacks }
-    : { hero: STARTING_STACK, bot: STARTING_STACK };
-  if (stacks.hero < BB || stacks.bot < BB) {
-    stacks.hero = STARTING_STACK;
-    stacks.bot = STARTING_STACK;
-  }
+    : { hero: startingStack, bot: startingStack };
   const hero = [deck.shift()!, deck.shift()!];
   const bot = [deck.shift()!, deck.shift()!];
-  const pips = { hero: dealer === "hero" ? SB : BB, bot: dealer === "bot" ? SB : BB };
+  const pips = {
+    hero: Math.min(stacks.hero, dealer === "hero" ? smallBlind : bigBlind),
+    bot: Math.min(stacks.bot, dealer === "bot" ? smallBlind : bigBlind),
+  };
   stacks.hero -= pips.hero;
   stacks.bot -= pips.bot;
-  return {
+  const fresh: Game = {
     handNo, deck, hero, bot, board: [], dealer, street: "preflop", turn: dealer,
-    pot: SB + BB, finalPot: 0, stacks, pips, currentBet: BB, minRaise: BB,
+    pot: pips.hero + pips.bot, finalPot: 0, stacks, pips, currentBet: Math.max(pips.hero, pips.bot), minRaise: bigBlind,
     raises: 0, acted: { hero: false, bot: false },
-    history: [`第 ${handNo} 手：${dealer === "hero" ? "你" : "AI"} 先放 ${SB}，另一方先放 ${BB}`],
+    history: [
+      `第 ${handNo} 手：${dealer === "hero" ? "你" : "AI"} 先放 ${smallBlind}，另一方先放 ${bigBlind}`,
+      ...(settings.mode === "tournament" && (handNo - 1) % 5 === 0 ? [`锦标赛第 ${level} 级：盲注 ${smallBlind}/${bigBlind}`] : []),
+    ],
     note: dealer === "hero"
       ? "这一手你有 D 标记。桌上发出公共牌后，对手会先选，你可以看完他的动作再决定。"
       : "这一手对手有 D 标记。桌上发出公共牌后，你需要先做决定。",
-    outcome: "", revealBot: false,
+    outcome: "", revealBot: false, smallBlind, bigBlind, startingStack, settings,
+    matchOver: false, rebuyPending: false,
   };
+  const other: Player = dealer === "hero" ? "bot" : "hero";
+  if (fresh.stacks[dealer] === 0 && fresh.pips[other] >= fresh.pips[dealer]) return showdown(fresh);
+  return fresh;
 }
 
 function runout(game: Game) {
@@ -226,7 +270,7 @@ function advanceStreet(game: Game): Game {
   const first: Player = game.dealer === "hero" ? "bot" : "hero";
   return {
     ...next, street, turn: first, pips: { hero: 0, bot: 0 }, currentBet: 0,
-    minRaise: BB, raises: 0, acted: { hero: false, bot: false },
+    minRaise: game.bigBlind, raises: 0, acted: { hero: false, bot: false },
     history: [...next.history, `${streetName[street]}发牌`],
     note: first === "hero"
       ? "公共牌已经出现。这一轮你先选，所以还不知道对手准备怎么做。"
@@ -319,8 +363,22 @@ function applyAction(game: Game, actor: Player, kind: ActionKind, raiseTo = 0, e
   return next;
 }
 
-function botDecision(game: Game) {
-  const equity = estimateEquity(game.bot, game.board, 170);
+function botDecision(game: Game, tendencies: Tendencies) {
+  const difficulty = game.settings.difficulty;
+  const profile = difficulty === "guide"
+    ? { samples: 90, foldBuffer: 0.12, bluff: 0, raiseAt: 0.82, betAt: 0.7, size: 0.45 }
+    : difficulty === "standard"
+      ? { samples: 220, foldBuffer: 0.06, bluff: 0.08, raiseAt: 0.74, betAt: 0.58, size: 0.62 }
+      : { samples: 520, foldBuffer: 0.02, bluff: 0.12, raiseAt: 0.67, betAt: 0.53, size: 0.72 };
+  const foldRate = tendencies.decisions ? tendencies.folds / tendencies.decisions : 0;
+  const raiseRate = tendencies.decisions ? tendencies.raises / tendencies.decisions : 0;
+  const adaptiveBluff = difficulty === "advanced"
+    ? Math.min(0.28, profile.bluff + foldRate * 0.22)
+    : profile.bluff;
+  const equity = Math.min(
+    1,
+    estimateEquity(game.bot, game.board, profile.samples) + (difficulty === "advanced" && raiseRate > 0.35 ? 0.025 : 0),
+  );
   const due = Math.max(0, game.currentBet - game.pips.bot);
   const odds = due > 0 ? due / (game.pot + due) : 0;
   const maxTarget = Math.min(
@@ -328,15 +386,17 @@ function botDecision(game: Game) {
     game.pips.hero + game.stacks.hero,
   );
   if (due > 0) {
-    if (equity + 0.06 < odds && Math.random() > 0.08) return applyAction(game, "bot", "fold");
-    if (equity > 0.74 && game.raises < 2 && game.stacks.bot > due + BB) {
-      const target = Math.min(maxTarget, game.currentBet + Math.max(game.minRaise, Math.round(game.pot * 0.55 / 5) * 5));
+    if (equity + profile.foldBuffer < odds && Math.random() > adaptiveBluff * 0.35) return applyAction(game, "bot", "fold");
+    if (equity > profile.raiseAt && game.raises < 2 && game.stacks.bot > due + game.bigBlind) {
+      const variedSize = difficulty === "advanced" ? 0.48 + Math.random() * 0.52 : profile.size;
+      const target = Math.min(maxTarget, game.currentBet + Math.max(game.minRaise, Math.round(game.pot * variedSize / 5) * 5));
       return applyAction(game, "bot", "raise", target);
     }
     return applyAction(game, "bot", "call");
   }
-  if ((equity > 0.58 || Math.random() < 0.08) && game.stacks.bot > 0) {
-    const target = Math.min(maxTarget, Math.max(BB, Math.round(game.pot * 0.62 / 5) * 5));
+  if ((equity > profile.betAt || Math.random() < adaptiveBluff) && game.stacks.bot > 0) {
+    const variedSize = difficulty === "advanced" ? 0.38 + Math.random() * 0.68 : profile.size;
+    const target = Math.min(maxTarget, Math.max(game.bigBlind, Math.round(game.pot * variedSize / 5) * 5));
     return applyAction(game, "bot", "raise", target);
   }
   return applyAction(game, "bot", "check");
@@ -531,23 +591,133 @@ function BeginnerCourse({ onStart }: { onStart: () => void }) {
   );
 }
 
+function SimulationSetup({
+  initial,
+  onStart,
+}: {
+  initial: TableSettings;
+  onStart: (settings: TableSettings) => void;
+}) {
+  const [draft, setDraft] = useState(initial);
+  const difficultyInfo = {
+    guide: { title: "陪练", tag: "第一次上桌", tone: "最容易", points: ["约 90 次胜率模拟", "不主动诈唬", "只有很强时才加注", "下注尺度固定、容易看懂"] },
+    standard: { title: "标准", tag: "理解基本规则后", tone: "接近普通玩家", points: ["约 220 次胜率模拟", "约 8% 随机诈唬", "会根据底池赔率弃牌", "会进行价值下注和加注"] },
+    advanced: { title: "进阶", tag: "练习真实博弈", tone: "最难", points: ["约 520 次胜率模拟", "下注尺度会混合变化", "记录你的弃牌与加注倾向", "你越常弃牌，它越常诈唬"] },
+  };
+
+  function patch(next: Partial<TableSettings>) {
+    setDraft((current) => ({ ...current, ...next }));
+  }
+
+  return (
+    <section className="simulation-setup" id="top">
+      <div className="setup-intro">
+        <p className="eyebrow">TABLE SIMULATOR / 牌局仿真</p>
+        <h1>先定规则，<br /><em>再坐上牌桌。</em></h1>
+        <p>这里设置的是实际牌局规则，不只是外观。AI 行为、盲注速度、筹码深度和输光后的处理都会跟着改变。</p>
+        <div className="simulation-badge"><span></span><b>单挑仿真</b><small>你 vs 1 位 AI · 无真钱</small></div>
+      </div>
+
+      <div className="setup-form">
+        <section className="setup-section">
+          <div className="setup-title"><b>01</b><div><span>先选 AI</span><h2>难度档次</h2></div></div>
+          <div className="difficulty-grid">
+            {(Object.keys(difficultyInfo) as Difficulty[]).map((key) => {
+              const info = difficultyInfo[key];
+              return (
+                <button key={key} className={draft.difficulty === key ? "selected" : ""} onClick={() => patch({ difficulty: key })}>
+                  <div><span>{info.tag}</span><strong>{info.title}</strong><em>{info.tone}</em></div>
+                  <ul>{info.points.map((point) => <li key={point}>{point}</li>)}</ul>
+                  <i>{draft.difficulty === key ? "已选择" : "选择"}</i>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        <section className="setup-section">
+          <div className="setup-title"><b>02</b><div><span>牌局怎么结束</span><h2>现金桌还是锦标赛</h2></div></div>
+          <div className="mode-grid">
+            <button className={draft.mode === "cash" ? "selected" : ""} onClick={() => patch({ mode: "cash", rebuy: draft.rebuy === "off" ? "off" : "auto" })}>
+              <span>CASH / 普通筹码桌</span><strong>随时打，盲注固定</strong>
+              <p>盲注一直是 5/10；每手结束都可以离开。输光后可按设置补充筹码。</p>
+            </button>
+            <button className={draft.mode === "tournament" ? "selected" : ""} onClick={() => patch({ mode: "tournament", rebuy: draft.rebuy === "auto" ? "manual" : draft.rebuy })}>
+              <span>TOURNAMENT / 锦标赛</span><strong>盲注升级，直到一方出局</strong>
+              <p>每 5 手盲注翻倍，逼迫牌局向前；输光后按再入规则处理。</p>
+            </button>
+          </div>
+        </section>
+
+        <section className="setup-section setup-pair">
+          <div>
+            <div className="setup-title"><b>03</b><div><span>能承受多少波动</span><h2>起始筹码</h2></div></div>
+            <div className="segmented">
+              {([50, 100, 200] as const).map((value) => (
+                <button key={value} className={draft.stackBB === value ? "selected" : ""} onClick={() => patch({ stackBB: value })}>
+                  <strong>{value} BB</strong><span>{value * BB} 筹码</span>
+                </button>
+              ))}
+            </div>
+            <p className="setup-help">BB 是“大盲”的缩写。100 BB 表示起始筹码等于 100 个大盲，最适合学习。</p>
+          </div>
+          <div>
+            <div className="setup-title"><b>04</b><div><span>输光之后怎么办</span><h2>再入规则</h2></div></div>
+            <div className="rebuy-options">
+              {draft.mode === "cash" && (
+                <button className={draft.rebuy === "auto" ? "selected" : ""} onClick={() => patch({ rebuy: "auto" })}>
+                  <strong>自动补满</strong><span>输光后自动恢复起始筹码</span>
+                </button>
+              )}
+              <button className={draft.rebuy === "manual" ? "selected" : ""} onClick={() => patch({ rebuy: "manual" })}>
+                <strong>手动再入</strong><span>输光后由你决定是否重新加入</span>
+              </button>
+              <button className={draft.rebuy === "off" ? "selected" : ""} onClick={() => patch({ rebuy: "off" })}>
+                <strong>禁止再入</strong><span>输光即结束整场</span>
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <section className="setup-summary">
+          <div>
+            <span>你的仿真牌局</span>
+            <strong>
+              {difficultyInfo[draft.difficulty].title} AI · {draft.mode === "cash" ? "普通筹码桌" : "锦标赛"} · {draft.stackBB} BB
+            </strong>
+            <p>
+              {draft.mode === "cash" ? "固定盲注 5/10" : "每 5 手盲注升级"}
+              {" · "}
+              {draft.rebuy === "auto" ? "自动补满" : draft.rebuy === "manual" ? "允许手动再入" : "输光结束"}
+            </p>
+          </div>
+          <button className="launch-table" onClick={() => onStart(draft)}>开始这场牌局 →</button>
+        </section>
+      </div>
+    </section>
+  );
+}
+
 export default function PokerTrainer() {
   const [game, setGame] = useState<Game | null>(null);
-  const [tab, setTab] = useState<"table" | "learn">("learn");
+  const [tab, setTab] = useState<"table" | "learn" | "setup">("learn");
   const [showHints, setShowHints] = useState(true);
   const [stats, setStats] = useState({ hands: 0, good: 0 });
+  const [settings, setSettings] = useState<TableSettings>(defaultSettings);
+  const [tendencies, setTendencies] = useState<Tendencies>({ decisions: 0, folds: 0, calls: 0, raises: 0 });
 
   useEffect(() => {
-    setGame(startHand());
+    setGame(startHand(undefined, defaultSettings));
     const saved = window.localStorage.getItem("holdem-dojo-stats");
     if (saved) setStats(JSON.parse(saved));
   }, []);
 
   useEffect(() => {
     if (!game || game.turn !== "bot" || game.street === "complete") return;
-    const timer = window.setTimeout(() => setGame((current) => current ? botDecision(current) : current), 620);
+    const thinkTime = game.settings.difficulty === "guide" ? 520 : game.settings.difficulty === "standard" ? 720 : 920;
+    const timer = window.setTimeout(() => setGame((current) => current ? botDecision(current, tendencies) : current), thinkTime);
     return () => window.clearTimeout(timer);
-  }, [game]);
+  }, [game, tendencies]);
 
   const equity = useMemo(() => {
     if (!game) return 0.5;
@@ -566,10 +736,10 @@ export default function PokerTrainer() {
     );
     const base = game.currentBet > 0
       ? game.currentBet + Math.max(game.minRaise, Math.round((game.pot + due) * 0.5 / 5) * 5)
-      : Math.max(BB, Math.round(game.pot * 0.5 / 5) * 5);
+      : Math.max(game.bigBlind, Math.round(game.pot * 0.5 / 5) * 5);
     const large = game.currentBet > 0
       ? game.currentBet + Math.max(game.minRaise, Math.round((game.pot + due) * 0.85 / 5) * 5)
-      : Math.max(BB, Math.round(game.pot * 0.85 / 5) * 5);
+      : Math.max(game.bigBlind, Math.round(game.pot * 0.85 / 5) * 5);
     return [
       { label: "1/2 池", value: Math.min(maxTarget, base) },
       { label: "大注", value: Math.min(maxTarget, large) },
@@ -579,6 +749,12 @@ export default function PokerTrainer() {
 
   function heroAct(kind: ActionKind, target = 0) {
     if (!game || game.turn !== "hero") return;
+    setTendencies((current) => ({
+      decisions: current.decisions + 1,
+      folds: current.folds + (kind === "fold" ? 1 : 0),
+      calls: current.calls + (kind === "call" || kind === "check" ? 1 : 0),
+      raises: current.raises + (kind === "raise" ? 1 : 0),
+    }));
     setGame(applyAction(game, "hero", kind, target, equity));
   }
 
@@ -590,7 +766,60 @@ export default function PokerTrainer() {
     };
     setStats(newStats);
     window.localStorage.setItem("holdem-dojo-stats", JSON.stringify(newStats));
+    const heroBusted = game.stacks.hero <= 0;
+    const botBusted = game.stacks.bot <= 0;
+    if (game.settings.mode === "cash" && (heroBusted || botBusted)) {
+      if (heroBusted && game.settings.rebuy !== "auto") {
+        setGame({ ...game, matchOver: true, rebuyPending: game.settings.rebuy === "manual" });
+        return;
+      }
+      const replenished: Game = {
+        ...game,
+        stacks: {
+          hero: heroBusted ? game.startingStack : game.stacks.hero,
+          bot: botBusted ? game.startingStack : game.stacks.bot,
+        },
+      };
+      setGame(startHand(replenished));
+      return;
+    }
+    if (game.settings.mode === "tournament" && (heroBusted || botBusted)) {
+      setGame({
+        ...game,
+        matchOver: true,
+        rebuyPending: heroBusted && game.settings.rebuy === "manual",
+        outcome: heroBusted ? "你失去全部有效筹码，本场锦标赛结束" : "AI 失去全部有效筹码，你赢下本场锦标赛",
+      });
+      return;
+    }
     setGame(startHand(game));
+  }
+
+  function startSimulation(nextSettings: TableSettings) {
+    setSettings(nextSettings);
+    setTendencies({ decisions: 0, folds: 0, calls: 0, raises: 0 });
+    setGame(startHand(undefined, nextSettings));
+    setShowHints(nextSettings.difficulty !== "advanced");
+    setTab("table");
+  }
+
+  function rebuy() {
+    if (!game) return;
+    const replenished: Game = {
+      ...game,
+      stacks: {
+        hero: game.stacks.hero <= 0 ? game.startingStack : game.stacks.hero,
+        bot: game.stacks.bot <= 0 ? game.startingStack : game.stacks.bot,
+      },
+      matchOver: false,
+      rebuyPending: false,
+    };
+    setGame(startHand(replenished));
+  }
+
+  function restartMatch() {
+    setTendencies({ decisions: 0, folds: 0, calls: 0, raises: 0 });
+    setGame(startHand(undefined, settings));
   }
 
   if (!game) return <main className="loading">正在洗牌…</main>;
@@ -598,6 +827,8 @@ export default function PokerTrainer() {
   const heroHand = game.board.length >= 3 ? evaluate([...game.hero, ...game.board]).name : "起手牌";
   const heroCanAct = game.turn === "hero" && game.street !== "complete";
   const isRedBot = game.bot[0].suit === "♥" || game.bot[0].suit === "♦";
+  const difficultyLabel = game.settings.difficulty === "guide" ? "陪练 AI" : game.settings.difficulty === "standard" ? "标准 AI" : "进阶 AI";
+  const tournamentLevel = blindsForHand(game.settings, game.handNo).level;
 
   return (
     <main>
@@ -608,6 +839,7 @@ export default function PokerTrainer() {
         </a>
         <nav aria-label="主导航">
           <button className={tab === "learn" ? "active" : ""} onClick={() => setTab("learn")}>从零开始</button>
+          <button className={tab === "setup" ? "active" : ""} onClick={() => setTab("setup")}>仿真设置</button>
           <button className={tab === "table" ? "active" : ""} onClick={() => setTab("table")}>牌桌练习</button>
         </nav>
         <div className="header-note"><span></span>纯单机 · 无真钱</div>
@@ -626,9 +858,9 @@ export default function PokerTrainer() {
           <section className="workspace">
             <div className="table-column">
               <div className="table-meta">
-                <span>第 {game.handNo} 手</span>
+                <span>{game.settings.mode === "cash" ? "普通筹码桌" : `锦标赛 Lv.${tournamentLevel}`} · {difficultyLabel}</span>
                 <span className="street-pill">{streetName[game.street]}</span>
-                <span>盲注 {SB}/{BB}</span>
+                <span>第 {game.handNo} 手 · 盲注 {game.smallBlind}/{game.bigBlind}</span>
               </div>
               <div className="poker-table">
                 <div className={`seat bot-seat ${game.turn === "bot" ? "thinking" : ""}`}>
@@ -665,10 +897,21 @@ export default function PokerTrainer() {
 
               <div className="action-panel">
                 {game.street === "complete" ? (
-                  <div className="result-row">
-                    <div><span>本手结果</span><strong>{game.outcome}</strong></div>
-                    <button className="primary-action" onClick={nextHand}>下一手牌 <kbd>N</kbd></button>
-                  </div>
+                  game.matchOver ? (
+                    <div className="result-row match-result">
+                      <div><span>{game.settings.mode === "tournament" ? "整场结果" : "筹码不足"}</span><strong>{game.outcome}</strong></div>
+                      <div className="result-actions">
+                        {game.rebuyPending && <button className="primary-action" onClick={rebuy}>再入并补到 {game.startingStack}</button>}
+                        <button onClick={restartMatch}>重新开赛</button>
+                        <button onClick={() => setTab("setup")}>修改设置</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="result-row">
+                      <div><span>本手结果</span><strong>{game.outcome}</strong></div>
+                      <button className="primary-action" onClick={nextHand}>下一手牌 <kbd>N</kbd></button>
+                    </div>
+                  )
                 ) : (
                   <>
                     <div className="turn-prompt">
@@ -702,6 +945,15 @@ export default function PokerTrainer() {
               <div className="coach-head">
                 <div><p className="eyebrow">LIVE COACH</p><h2>决策教练</h2></div>
                 <label className="switch"><input type="checkbox" checked={showHints} onChange={(e) => setShowHints(e.target.checked)} /><span></span>提示</label>
+              </div>
+              <div className={`ai-profile ${game.settings.difficulty}`}>
+                <div><span>当前对手</span><strong>{difficultyLabel}</strong></div>
+                <button onClick={() => setTab("setup")}>更换难度</button>
+                <p>
+                  {game.settings.difficulty === "guide" && "不诈唬、强牌才加注，适合边看提示边理解规则。"}
+                  {game.settings.difficulty === "standard" && "会计算赔率、偶尔诈唬，并使用不同的价值下注。"}
+                  {game.settings.difficulty === "advanced" && `正在观察你：已记录 ${tendencies.decisions} 次决定，弃牌 ${tendencies.decisions ? Math.round(tendencies.folds / tendencies.decisions * 100) : 0}%，加注 ${tendencies.decisions ? Math.round(tendencies.raises / tendencies.decisions * 100) : 0}%。`}
+                </p>
               </div>
               {showHints ? (
                 <>
@@ -755,14 +1007,16 @@ export default function PokerTrainer() {
             </div>
           </section>
         </>
+      ) : tab === "setup" ? (
+        <SimulationSetup initial={settings} onStart={startSimulation} />
       ) : (
-        <BeginnerCourse onStart={() => setTab("table")} />
+        <BeginnerCourse onStart={() => setTab("setup")} />
       )}
 
       <footer>
         <div><span className="brand-mark">D</span><strong>德州研习室</strong></div>
         <p>学习概率与策略，不提供充值、匹配、排行榜或真钱玩法。</p>
-        <button onClick={() => { setGame(startHand()); setTab("learn"); }}>重新从零学习</button>
+        <button onClick={() => { setSettings(defaultSettings); setGame(startHand(undefined, defaultSettings)); setTab("learn"); }}>重新从零学习</button>
       </footer>
     </main>
   );
